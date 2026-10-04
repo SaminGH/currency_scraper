@@ -1,4 +1,4 @@
-import logger
+import logs.logger as logger
 import database
 
 
@@ -15,11 +15,11 @@ if __name__ == "__main__":
         connection = database.get_connection()
         snapshot_id = database.create_snapshot(run_id, connection=connection)
         logger.set_snapshot_id(snapshot_id)
-
-        import scraper_output
-        import validator
-        import price_aggregator
-        import change
+    
+        import scraper_output as scraper_output
+        import validator as validator
+        import price_aggregator as price_aggregator
+        import change as change
 
         raw_prices = scraper_output.prices
         source_status = getattr(scraper_output, "source_status", {})

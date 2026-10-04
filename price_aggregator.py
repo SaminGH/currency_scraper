@@ -1,7 +1,7 @@
 from datetime import datetime
 
-import validator
-import logger
+import validator as validator
+import logs.logger as logger
 
 logger.log_event(level="INFO", event="aggregation_started", component="aggregator")
 final_prices = {}

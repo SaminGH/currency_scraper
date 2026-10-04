@@ -1,5 +1,5 @@
-import scraper_manager
-import logger
+import scraper_manager as scraper_manager
+import logs.logger as logger
 
 
 # ============================================================

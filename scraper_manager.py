@@ -3,12 +3,12 @@ import queue
 from dataclasses import dataclass
 import time
 
-import logger
+import logs.logger as logger
 
-import scrapers.alanchand
-import scrapers.navasan
-import scrapers.bonbast
-import scrapers.tgju
+import scrapers.alanchand as alanchand
+import scrapers.navasan as navasan
+import scrapers.bonbast as bonbast
+import scrapers.tgju as tgju
 
 
 # ============================================================
@@ -33,10 +33,10 @@ PROCESS_POLL_INTERVAL = 0.05
 # ============================================================
 
 SCRAPERS = {
-    "alanchand": scrapers.alanchand.scrape,
-    "navasan":  scrapers.navasan.scrape,
-    "bonbast": scrapers.bonbast.scrape,
-    "tgju": scrapers.tgju.scrape,
+    "alanchand": alanchand.scrape,
+    "navasan":  navasan.scrape,
+    "bonbast": bonbast.scrape,
+    "tgju": tgju.scrape,
 }
 
 

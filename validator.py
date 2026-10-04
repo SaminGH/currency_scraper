@@ -2,8 +2,8 @@ import statistics
 from dataclasses import dataclass
 from typing import Any
 
-import scraper_output
-import logger
+import scraper_output as scraper_output
+import logs.logger as logger
 
 
 # ============================================================

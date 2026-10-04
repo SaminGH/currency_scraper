@@ -1,6 +1,6 @@
 from datetime import datetime
 
-import logger
+import logs.logger as logger
 
 from .connection import get_connection
 

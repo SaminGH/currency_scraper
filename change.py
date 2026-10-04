@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-import logger
+import logs.logger as logger
 import database
 
 

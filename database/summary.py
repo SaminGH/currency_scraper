@@ -1,4 +1,4 @@
-import logger
+import logs.logger as logger
 
 from .connection import get_connection
 

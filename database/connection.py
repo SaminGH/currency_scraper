@@ -1,12 +1,16 @@
 import os
+from pathlib import Path
 
 import psycopg2
 from dotenv import load_dotenv
 
-import logger
+import logs.logger as logger
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / "environment" / ".env"
 
 
-load_dotenv()
+load_dotenv(ENV_FILE)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 

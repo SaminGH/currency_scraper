@@ -3,8 +3,9 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
+from pathlib import Path
 
-import logger
+import logs.logger as logger
 
 
 # ============================================================
@@ -13,11 +14,12 @@ import logger
 
 SOURCE_NAME = "navasan"
 
-URL = "https://www.navasan.net/"
+BASE_DIR = Path(__file__).resolve().parent.parent
+SERVICE_FILE = BASE_DIR / "environment" / "chromedriver-win64" / "chromedriver.exe"
 
-service = Service(
-    r"C:\Users\samin\Downloads\Compressed\chromedriver-win64\chromedriver-win64\chromedriver.exe"
-)
+service = Service(executable_path=str(SERVICE_FILE))
+
+URL = "https://www.navasan.net/"
 
 
 # ============================================================

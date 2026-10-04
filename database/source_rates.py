@@ -1,4 +1,4 @@
-import logger
+import logs.logger as logger
 from psycopg2.extras import execute_values
 
 from .connection import get_connection
