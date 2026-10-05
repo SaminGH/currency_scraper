@@ -1,0 +1,25 @@
+# Antigravity context exclusion rules
+
+# Environment and sensitive files
+.env
+.env.*
+environment/.env
+environment/.env.*
+*.env
+
+# Logs and runtime data
+logs/*.jsonl
+logs/*.log
+
+# Python bytecode and caches
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*.py[cod]
+
+# Large binaries and driver distributions
+environment/chromedriver-win64/
+
+# Version control & editor artifacts
+.git/
+.vscode/
