@@ -1,4 +1,4 @@
-import requests
+import httpx
 from bs4 import BeautifulSoup
 
 import logs.logger as logger
@@ -159,7 +159,7 @@ class SelectorError(Exception):
 # Scraper
 # ============================================================
 
-def scrape():
+async def scrape():
 
     """
     Scrape currency prices from Alanchand.
@@ -196,26 +196,29 @@ def scrape():
         # دریافت صفحه
         # ====================================================
 
-        response = requests.get(
-            URL,
+        async with httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT,
             headers={
                 "User-Agent": "Mozilla/5.0"
-            }
-        )
+            },
+            follow_redirects=True
+        ) as client:
+            response = await client.get(URL)
 
-        # ====================================================
-        # بررسی HTTP Error
-        # ====================================================
+            # ====================================================
+            # بررسی HTTP Error
+            # ====================================================
 
-        response.raise_for_status()
+            response.raise_for_status()
+
+            html_text = response.text
 
         # ====================================================
         # تبدیل HTML به BeautifulSoup
         # ====================================================
 
         soup = BeautifulSoup(
-            response.text,
+            html_text,
             "html.parser"
         )
 
@@ -492,7 +495,7 @@ def scrape():
     # Timeout
     # ========================================================
 
-    except requests.exceptions.Timeout as error:
+    except httpx.TimeoutException as error:
 
         status = "failed"
 
@@ -514,7 +517,7 @@ def scrape():
     # Connection Error
     # ========================================================
 
-    except requests.exceptions.ConnectionError as error:
+    except httpx.ConnectError as error:
 
         status = "failed"
 
@@ -536,7 +539,7 @@ def scrape():
     # HTTP Error
     # ========================================================
 
-    except requests.exceptions.HTTPError as error:
+    except httpx.HTTPStatusError as error:
 
         status = "failed"
 
@@ -576,7 +579,7 @@ def scrape():
     # سایر Request Error ها
     # ========================================================
 
-    except requests.exceptions.RequestException as error:
+    except httpx.RequestError as error:
 
         status = "failed"
 

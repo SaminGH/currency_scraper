@@ -29,7 +29,13 @@ def save_published_rates(snapshot_id, published_rates, connection=None):
             raise ValueError(f"published_sources_total_missing: {currency}")
         sources = data.get("sources", [])
         sources_used = data.get("sources_used", len(sources) if isinstance(sources, list) else 0)
-        rows.append((snapshot_id, currency_ids[currency], price, data.get("change_24h"), sources_total, sources_used, data.get("confidence", "unknown")))
+        change_24h = data.get("change_24h")
+        if isinstance(change_24h, str):
+            try:
+                change_24h = float(change_24h.replace("%", "").strip())
+            except (ValueError, TypeError):
+                change_24h = None
+        rows.append((snapshot_id, currency_ids[currency], price, change_24h, sources_total, sources_used, data.get("confidence", "unknown")))
     if rows:
         with db.cursor() as cursor:
             execute_values(cursor, """

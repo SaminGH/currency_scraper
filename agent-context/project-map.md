@@ -12,11 +12,11 @@ Automated currency scraping, validation, aggregation, and publishing pipeline fo
 
 ## Important Files & Entry Points
 * `main.py`: Primary pipeline orchestrator and CLI entry point.
-* `scraper_manager.py`: Multiprocessing execution manager with timeouts, retries, and worker isolation for scrapers.
+* `scraper_manager.py`: Hybrid asyncio + multiprocessing execution manager with timeouts, retries, and worker isolation for scrapers (asyncio for HTTP scrapers, multiprocessing for Selenium scrapers).
 * `scraper_output.py`: Aggregates outputs from `scraper_manager` across all sources by currency.
 * `validator.py`: Outlier detection (1% threshold) and data consistency checking.
 * `price_aggregator.py`: Computes average prices, confidence metrics, and publishability flags (>= 2 valid sources).
-* `change.py`: Calculates 24h price change percentage relative to prior snapshot.
+* `change.py`: Calculates daily 24h price change percentage, delta, and 24h high/low price extremes relative to daily midnight baseline snapshots.
 * `database/__init__.py`: Public API interface for database operations.
 * `database/connection.py`: Reusable PostgreSQL connection provider using `psycopg2`.
 * `database/publisher.py`: Atomic transaction publisher managing savepoints and final snapshot completion.
@@ -29,7 +29,7 @@ main.py
   ├── scraper_output.py  ──> scraper_manager.py ──> scrapers/ (alanchand, bonbast, navasan, tgju)
   ├── validator.py       ──> filters outliers from scraper_output
   ├── price_aggregator.py──> averages validated rates & assesses confidence
-  ├── change.py          ──> calculates 24-hour rate delta against previous snapshot
+  ├── change.py          ──> calculates 24h change & extremes against midnight baselines
   └── database.publish_snapshot()
         ├── save_source_health
         ├── save_source_rates

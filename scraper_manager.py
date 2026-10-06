@@ -1,3 +1,4 @@
+import asyncio
 import multiprocessing
 import queue
 from dataclasses import dataclass
@@ -31,6 +32,16 @@ PROCESS_POLL_INTERVAL = 0.05
 # ============================================================
 # ثبت Scraperها
 # ============================================================
+
+ASYNC_SCRAPERS = {
+    "alanchand": alanchand.scrape,
+    "tgju": tgju.scrape,
+}
+
+MULTIPROCESS_SCRAPERS = {
+    "bonbast": bonbast.scrape,
+    "navasan": navasan.scrape,
+}
 
 SCRAPERS = {
     "alanchand": alanchand.scrape,
@@ -100,15 +111,52 @@ def should_retry(result):
 
 
 # ============================================================
-# اجرای یک Scraper
+# ساخت نتیجه Failed
 # ============================================================
 
-def _run_scraper(source, scraper):
-    """
-    اجرای یک scraper با Retry و Failure Isolation.
+def _build_failed_result(source, error_type, message):
+    return {
+        "source": source,
+        "status": "failed",
+        "prices": {},
+        "errors": {
+            "_scraper": {
+                "type": error_type,
+                "message": message,
+            }
+        },
+    }
 
-    Timeout واقعی توسط Process والد در run_all()
-    کنترل می‌شود.
+
+def _format_result(source, result):
+    if isinstance(result, ScraperExecutionResult):
+        return {
+            "source": result.source,
+            "status": result.status,
+            "prices": result.prices,
+            "errors": result.errors,
+        }
+    elif isinstance(result, dict):
+        return {
+            "source": result.get("source", source),
+            "status": result.get("status", "failed"),
+            "prices": result.get("prices", {}) if isinstance(result.get("prices"), dict) else {},
+            "errors": result.get("errors", {}) if isinstance(result.get("errors"), dict) else {},
+        }
+    return _build_failed_result(
+        source=source,
+        error_type="invalid_worker_result",
+        message="worker returned invalid result",
+    )
+
+
+# ============================================================
+# اجرای همگام یک Scraper (برای Multiprocessing)
+# ============================================================
+
+def _run_sync_scraper(source, scraper):
+    """
+    اجرای یک scraper همگام با Retry و Failure Isolation.
     """
 
     attempts = 0
@@ -122,7 +170,7 @@ def _run_scraper(source, scraper):
             event="scraper_started",
             component="scraper_manager",
             source=source,
-            attempt=attempts
+            attempt=attempts,
         )
 
         try:
@@ -181,7 +229,7 @@ def _run_scraper(source, scraper):
                     component="scraper_manager",
                     source=source,
                     attempt=attempts,
-                    reason="retryable_error"
+                    reason="retryable_error",
                 )
 
                 time.sleep(RETRY_DELAY)
@@ -203,7 +251,7 @@ def _run_scraper(source, scraper):
                 source=source,
                 status=status,
                 currencies=len(prices),
-                attempts=attempts
+                attempts=attempts,
             )
 
             return ScraperExecutionResult(
@@ -211,7 +259,7 @@ def _run_scraper(source, scraper):
                 status=status,
                 prices=prices,
                 errors=errors,
-                attempts=attempts
+                attempts=attempts,
             )
 
         except Exception as error:
@@ -227,13 +275,8 @@ def _run_scraper(source, scraper):
                 source=source,
                 attempt=attempts,
                 error_type=type(error).__name__,
-                reason=str(error)
+                reason=str(error),
             )
-
-            # -----------------------------------------------
-            # Exception غیرقابل تشخیص:
-            # فعلاً Retry نمی‌کنیم
-            # -----------------------------------------------
 
             return ScraperExecutionResult(
                 source=source,
@@ -242,15 +285,11 @@ def _run_scraper(source, scraper):
                 errors={
                     "_scraper": {
                         "type": "manager_exception",
-                        "message": str(error)
+                        "message": str(error),
                     }
                 },
-                attempts=attempts
+                attempts=attempts,
             )
-
-    # ========================================================
-    # نباید به اینجا برسیم، ولی Failure Isolation حفظ شود
-    # ========================================================
 
     return ScraperExecutionResult(
         source=source,
@@ -259,15 +298,19 @@ def _run_scraper(source, scraper):
         errors={
             "_scraper": {
                 "type": "retry_exhausted",
-                "message": "maximum retry attempts reached"
+                "message": "maximum retry attempts reached",
             }
         },
-        attempts=attempts
+        attempts=attempts,
     )
 
 
+# حفظ سازگاری نام قبلی تابع
+_run_scraper = _run_sync_scraper
+
+
 # ============================================================
-# Worker Process
+# Worker Process برای Multiprocessing
 # ============================================================
 
 def _scraper_worker(source, scraper, result_queue, run_id, snapshot_id):
@@ -284,15 +327,15 @@ def _scraper_worker(source, scraper, result_queue, run_id, snapshot_id):
 
     try:
 
-        result = _run_scraper(
+        result = _run_sync_scraper(
             source,
-            scraper
+            scraper,
         )
 
         result_queue.put(
             (
                 source,
-                result
+                result,
             )
         )
 
@@ -304,7 +347,7 @@ def _scraper_worker(source, scraper, result_queue, run_id, snapshot_id):
             component="scraper_manager",
             source=source,
             error_type=type(error).__name__,
-            reason=str(error)
+            reason=str(error),
         )
 
         result_queue.put(
@@ -317,69 +360,28 @@ def _scraper_worker(source, scraper, result_queue, run_id, snapshot_id):
                     errors={
                         "_scraper": {
                             "type": "worker_exception",
-                            "message": str(error)
+                            "message": str(error),
                         }
                     },
-                    attempts=0
-                )
+                    attempts=0,
+                ),
             )
         )
 
 
 # ============================================================
-# ساخت نتیجه Failed
+# مانیتورینگ غیرمسدودکننده Process در Asyncio
 # ============================================================
 
-def _build_failed_result(source, error_type, message):
-    return {
-        "source": source,
-        "status": "failed",
-        "prices": {},
-        "errors": {
-            "_scraper": {
-                "type": error_type,
-                "message": message
-            }
-        }
-    }
-
-
-# ============================================================
-# اجرای تمام Scraperها
-# ============================================================
-
-def run_all():
+async def _run_mp_source(source, scraper, run_id, snapshot_id):
     """
-    اجرای تمام scraperهای فعال به صورت concurrent با Process.
-
-    هر source timeout مستقل دارد.
-    SOURCE_TIMEOUT شامل کل اجرای scraper و تمام retryهای آن است.
+    اجرای یک scraper چندپردازشی با Queue اختصاصی و نظارت غیرمسدودکننده.
     """
 
-    logger.log_event(
-        level="INFO",
-        event="scraper_manager_started",
-        component="scraper_manager",
-        sources=len(SCRAPERS)
-    )
-
-    results = {}
-    
-    run_id = logger.get_run_id()
-    
-    snapshot_id = logger.get_snapshot_id()
-    
     result_queue = multiprocessing.Queue()
+    process = None
 
-    processes = {}
-
-    started_at = {}
-
-    # ========================================================
-    # اجرای Processها
-    # ========================================================
-
-    for source, scraper in SCRAPERS.items():
+    try:
 
         process = multiprocessing.Process(
             target=_scraper_worker,
@@ -388,170 +390,59 @@ def run_all():
                 scraper,
                 result_queue,
                 run_id,
-                snapshot_id
+                snapshot_id,
             ),
-            name=f"scraper-{source}"
+            name=f"scraper-{source}",
         )
 
+        start_time = time.monotonic()
         process.start()
-
-        processes[source] = process
-        started_at[source] = time.monotonic()
-
-    # ========================================================
-    # مانیتور Processها
-    # ========================================================
-
-    remaining_sources = set(processes.keys())
-
-    while remaining_sources:
-
-        # ----------------------------------------------------
-        # دریافت تمام resultهای موجود در Queue
-        # ----------------------------------------------------
 
         while True:
 
+            # ------------------------------------------------
+            # دریافت نتیجه در صورت آماده بودن
+            # ------------------------------------------------
+
             try:
 
-                source, result = result_queue.get_nowait()
+                _, result = result_queue.get_nowait()
+
+                process.join(timeout=0.5)
+
+                return _format_result(source, result)
 
             except queue.Empty:
 
-                break
-
-            except Exception as error:
-
-                logger.log_event(
-                    level="ERROR",
-                    event="scraper_queue_failed",
-                    component="scraper_manager",
-                    error_type=type(error).__name__,
-                    reason=str(error)
-                )
-
-                break
+                pass
 
             # ------------------------------------------------
-            # ثبت نتیجه
-            # ------------------------------------------------
-
-            if source in remaining_sources:
-
-                if isinstance(result, ScraperExecutionResult):
-
-                    results[source] = {
-                        "source": result.source,
-                        "status": result.status,
-                        "prices": result.prices,
-                        "errors": result.errors
-                    }
-
-                else:
-
-                    results[source] = _build_failed_result(
-                        source=source,
-                        error_type="invalid_worker_result",
-                        message="worker returned invalid result"
-                    )
-
-                remaining_sources.remove(source)
-
-        # ----------------------------------------------------
-        # بررسی Processهای تمام‌شده و Timeout
-        # ----------------------------------------------------
-
-        current_time = time.monotonic()
-
-        for source in list(remaining_sources):
-
-            process = processes[source]
-
-            # ------------------------------------------------
-            # Process تمام شده ولی هنوز result ثبت نشده
+            # بررسی خاتمه غیرمنتظره Process
             # ------------------------------------------------
 
             if not process.is_alive():
 
-                process.join(timeout=0)
+                process.join(timeout=0.2)
 
-                # یک فرصت کوتاه برای flush شدن Queue
                 try:
 
-                    source_from_queue, result = result_queue.get(
-                        timeout=0.1
-                    )
+                    _, result = result_queue.get(timeout=0.5)
 
-                    if source_from_queue == source:
-
-                        if isinstance(
-                            result,
-                            ScraperExecutionResult
-                        ):
-
-                            results[source] = {
-                                "source": result.source,
-                                "status": result.status,
-                                "prices": result.prices,
-                                "errors": result.errors
-                            }
-
-                        else:
-
-                            results[source] = _build_failed_result(
-                                source=source,
-                                error_type="invalid_worker_result",
-                                message="worker returned invalid result"
-                            )
-
-                        remaining_sources.remove(source)
-
-                        continue
-
-                    # اگر نتیجه مربوط به source دیگری بود
-                    if source_from_queue in remaining_sources:
-
-                        other_result = result
-
-                        if isinstance(
-                            other_result,
-                            ScraperExecutionResult
-                        ):
-
-                            results[source_from_queue] = {
-                                "source": other_result.source,
-                                "status": other_result.status,
-                                "prices": other_result.prices,
-                                "errors": other_result.errors
-                            }
-
-                        else:
-
-                            results[source_from_queue] = _build_failed_result(
-                                source=source_from_queue,
-                                error_type="invalid_worker_result",
-                                message="worker returned invalid result"
-                            )
-
-                        remaining_sources.remove(source_from_queue)
+                    return _format_result(source, result)
 
                 except queue.Empty:
 
-                    results[source] = _build_failed_result(
+                    return _build_failed_result(
                         source=source,
                         error_type="process_exited_without_result",
-                        message="scraper process exited without returning a result"
+                        message="scraper process exited without returning a result",
                     )
 
-                    remaining_sources.remove(source)
-
-                continue
-
             # ------------------------------------------------
-            # Timeout واقعی برای همین source
+            # بررسی Timeout
             # ------------------------------------------------
 
-            elapsed = current_time - started_at[source]
+            elapsed = time.monotonic() - start_time
 
             if elapsed >= SOURCE_TIMEOUT:
 
@@ -560,73 +451,361 @@ def run_all():
                     event="scraper_timeout",
                     component="scraper_manager",
                     source=source,
-                    timeout=SOURCE_TIMEOUT
+                    timeout=SOURCE_TIMEOUT,
                 )
-
-                # ------------------------------------------------
-                # terminate واقعی Process
-                # ------------------------------------------------
-
-                process.terminate()
-
-                process.join(timeout=1)
-
-                # ------------------------------------------------
-                # اگر terminate کافی نبود
-                # ------------------------------------------------
 
                 if process.is_alive():
 
-                    logger.log_event(
-                        level="ERROR",
-                        event="scraper_process_terminate_failed",
-                        component="scraper_manager",
-                        source=source
-                    )
+                    process.terminate()
 
-                results[source] = _build_failed_result(
+                    process.join(timeout=1)
+
+                    if process.is_alive():
+
+                        logger.log_event(
+                            level="ERROR",
+                            event="scraper_process_terminate_failed",
+                            component="scraper_manager",
+                            source=source,
+                        )
+
+                return _build_failed_result(
                     source=source,
                     error_type="timeout",
-                    message=(
-                        f"scraper exceeded "
-                        f"{SOURCE_TIMEOUT} seconds"
-                    )
+                    message=f"scraper exceeded {SOURCE_TIMEOUT} seconds",
                 )
 
-                remaining_sources.remove(source)
+            await asyncio.sleep(PROCESS_POLL_INTERVAL)
 
-        # ----------------------------------------------------
-        # جلوگیری از busy loop
-        # ----------------------------------------------------
+    except Exception as error:
 
-        if remaining_sources:
+        logger.log_event(
+            level="ERROR",
+            event="scraper_exception",
+            component="scraper_manager",
+            source=source,
+            attempt=0,
+            error_type=type(error).__name__,
+            reason=str(error),
+        )
 
-            time.sleep(PROCESS_POLL_INTERVAL)
+        return _build_failed_result(
+            source=source,
+            error_type="manager_exception",
+            message=str(error),
+        )
 
-    # ========================================================
-    # Cleanup
-    # ========================================================
+    finally:
 
-    for source, process in processes.items():
-
-        if process.is_alive():
+        if process is not None and process.is_alive():
 
             process.terminate()
 
-        process.join(timeout=1)
+            process.join(timeout=1)
+
+        try:
+
+            result_queue.close()
+            result_queue.join_thread()
+
+        except Exception:
+
+            pass
+
+
+# ============================================================
+# اجرای Scraperهای Asynchronous
+# ============================================================
+
+async def _run_async_scraper(source, scraper):
+    """
+    اجرای یک scraper ناهمگام با Retry و Failure Isolation.
+    """
+
+    attempts = 0
+
+    while attempts <= MAX_RETRIES:
+
+        attempts += 1
+
+        logger.log_event(
+            level="INFO",
+            event="scraper_started",
+            component="scraper_manager",
+            source=source,
+            attempt=attempts,
+        )
+
+        try:
+
+            result = await scraper()
+
+            # ------------------------------------------------
+            # بررسی ساختار خروجی
+            # ------------------------------------------------
+
+            if not isinstance(result, dict):
+
+                raise ValueError(
+                    "scraper_result_is_not_dict"
+                )
+
+            result_source = result.get("source")
+
+            if result_source != source:
+
+                raise ValueError(
+                    "scraper_source_mismatch"
+                )
+
+            status = result.get("status")
+
+            prices = result.get("prices", {})
+
+            errors = result.get("errors", {})
+
+            if not isinstance(prices, dict):
+
+                raise ValueError(
+                    "scraper_prices_is_not_dict"
+                )
+
+            if not isinstance(errors, dict):
+
+                raise ValueError(
+                    "scraper_errors_is_not_dict"
+                )
+
+            # ------------------------------------------------
+            # بررسی Retry
+            # ------------------------------------------------
+
+            if (
+                status == "failed"
+                and should_retry(result)
+                and attempts <= MAX_RETRIES
+            ):
+
+                logger.log_event(
+                    level="WARNING",
+                    event="scraper_retry",
+                    component="scraper_manager",
+                    source=source,
+                    attempt=attempts,
+                    reason="retryable_error",
+                )
+
+                await asyncio.sleep(RETRY_DELAY)
+
+                continue
+
+            # ------------------------------------------------
+            # نتیجه نهایی
+            # ------------------------------------------------
+
+            logger.log_event(
+                level=(
+                    "INFO"
+                    if status in ("complete", "partial")
+                    else "ERROR"
+                ),
+                event="scraper_completed",
+                component="scraper_manager",
+                source=source,
+                status=status,
+                currencies=len(prices),
+                attempts=attempts,
+            )
+
+            return {
+                "source": source,
+                "status": status,
+                "prices": prices,
+                "errors": errors,
+            }
+
+        except Exception as error:
+
+            logger.log_event(
+                level="ERROR",
+                event="scraper_exception",
+                component="scraper_manager",
+                source=source,
+                attempt=attempts,
+                error_type=type(error).__name__,
+                reason=str(error),
+            )
+
+            return {
+                "source": source,
+                "status": "failed",
+                "prices": {},
+                "errors": {
+                    "_scraper": {
+                        "type": "manager_exception",
+                        "message": str(error),
+                    }
+                },
+            }
+
+    return {
+        "source": source,
+        "status": "failed",
+        "prices": {},
+        "errors": {
+            "_scraper": {
+                "type": "retry_exhausted",
+                "message": "maximum retry attempts reached",
+            }
+        },
+    }
+
+
+async def _run_async_source(source, scraper):
+    """
+    اجرای یک source ناهمگام با timeout سختگیرانه SOURCE_TIMEOUT و پاکسازی اتصالات.
+    """
+
+    task = asyncio.create_task(_run_async_scraper(source, scraper))
 
     try:
 
-        result_queue.close()
-        result_queue.join_thread()
+        result = await asyncio.wait_for(
+            asyncio.shield(task),
+            timeout=SOURCE_TIMEOUT,
+        )
 
-    except Exception:
+        return _format_result(source, result)
 
-        pass
+    except (asyncio.TimeoutError, TimeoutError):
 
-    # ========================================================
-    # Manager Summary
-    # ========================================================
+        logger.log_event(
+            level="ERROR",
+            event="scraper_timeout",
+            component="scraper_manager",
+            source=source,
+            timeout=SOURCE_TIMEOUT,
+        )
+
+        return _build_failed_result(
+            source=source,
+            error_type="timeout",
+            message=f"scraper exceeded {SOURCE_TIMEOUT} seconds",
+        )
+
+    except Exception as error:
+
+        logger.log_event(
+            level="ERROR",
+            event="scraper_exception",
+            component="scraper_manager",
+            source=source,
+            attempt=0,
+            error_type=type(error).__name__,
+            reason=str(error),
+        )
+
+        return _build_failed_result(
+            source=source,
+            error_type="manager_exception",
+            message=str(error),
+        )
+
+    finally:
+
+        if not task.done():
+
+            task.cancel()
+
+            try:
+
+                await task
+
+            except (asyncio.CancelledError, Exception):
+
+                pass
+
+
+# ============================================================
+# هماهنگ‌سازی تمام Scraperها در Asyncio
+# ============================================================
+
+async def _run_all_async():
+    """
+    هماهنگ‌سازی همزمان تمام scraperهای async و multiprocess با asyncio.gather.
+    """
+
+    logger.log_event(
+        level="INFO",
+        event="scraper_manager_started",
+        component="scraper_manager",
+        sources=len(SCRAPERS),
+    )
+
+    run_id = logger.get_run_id()
+
+    snapshot_id = logger.get_snapshot_id()
+
+    tasks = []
+    sources = []
+
+    for source in SCRAPERS:
+
+        sources.append(source)
+        scraper = SCRAPERS[source]
+
+        if source in ASYNC_SCRAPERS or asyncio.iscoroutinefunction(scraper):
+
+            tasks.append(
+                _run_async_source(source, scraper)
+            )
+
+        else:
+
+            tasks.append(
+                _run_mp_source(
+                    source,
+                    scraper,
+                    run_id,
+                    snapshot_id,
+                )
+            )
+
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = {}
+
+    for source, res in zip(sources, raw_results):
+
+        if isinstance(res, Exception):
+
+            logger.log_event(
+                level="ERROR",
+                event="scraper_exception",
+                component="scraper_manager",
+                source=source,
+                attempt=0,
+                error_type=type(res).__name__,
+                reason=str(res),
+            )
+
+            results[source] = _build_failed_result(
+                source=source,
+                error_type="manager_exception",
+                message=str(res),
+            )
+
+        elif isinstance(res, dict):
+
+            results[source] = res
+
+        else:
+
+            results[source] = _build_failed_result(
+                source=source,
+                error_type="invalid_worker_result",
+                message="worker returned invalid result",
+            )
 
     successful = sum(
         1
@@ -657,7 +836,43 @@ def run_all():
         sources=len(results),
         successful=successful,
         partial=partial,
-        failed=failed
+        failed=failed,
     )
 
     return results
+
+
+# ============================================================
+# نقطه ورود عمومی همگام
+# ============================================================
+
+def run_all():
+    """
+    اجرای تمام scraperهای فعال به صورت concurrent.
+
+    - Async scrapers (alanchand, tgju) از طریق asyncio
+    - Multiprocess scrapers (bonbast, navasan) از طریق Process و Queue اختصاصی
+    - نقطه ورود همگام سازگار با scraper_output و main
+    """
+
+    try:
+
+        loop = asyncio.get_running_loop()
+
+    except RuntimeError:
+
+        loop = None
+
+    if loop and loop.is_running():
+
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+
+            future = executor.submit(lambda: asyncio.run(_run_all_async()))
+
+            return future.result()
+
+    else:
+
+        return asyncio.run(_run_all_async())

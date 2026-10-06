@@ -1,4 +1,4 @@
-import requests
+import httpx
 from bs4 import BeautifulSoup
 
 import logs.logger as logger
@@ -86,7 +86,7 @@ currency_units = {
 # Scraper
 # ============================================================
 
-def scrape():
+async def scrape():
     """
     Scrape currency prices from TGJU.
 
@@ -123,19 +123,22 @@ def scrape():
         # دریافت صفحه TGJU
         # ====================================================
 
-        response = requests.get(
-            URL,
+        async with httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT,
             headers={
                 "User-Agent": "Mozilla/5.0"
-            }
-        )
+            },
+            follow_redirects=True
+        ) as client:
+            response = await client.get(URL)
 
-        # ====================================================
-        # بررسی HTTP Error
-        # ====================================================
+            # ====================================================
+            # بررسی HTTP Error
+            # ====================================================
 
-        response.raise_for_status()
+            response.raise_for_status()
+
+            html_text = response.text
 
         # ====================================================
         # تبدیل HTML به BeautifulSoup
@@ -144,7 +147,7 @@ def scrape():
         try:
 
             soup = BeautifulSoup(
-                response.text,
+                html_text,
                 "html.parser"
             )
 
@@ -447,7 +450,7 @@ def scrape():
                 reason="no_currencies_scraped"
             )
 
-    except requests.exceptions.Timeout as error:
+    except httpx.TimeoutException as error:
 
         # ====================================================
         # Timeout کل Source
@@ -469,7 +472,7 @@ def scrape():
             error_type="timeout"
         )
 
-    except requests.exceptions.ConnectionError as error:
+    except httpx.ConnectError as error:
 
         # ====================================================
         # Connection Error
@@ -491,7 +494,7 @@ def scrape():
             error_type="connection_error"
         )
 
-    except requests.exceptions.HTTPError as error:
+    except httpx.HTTPStatusError as error:
 
         # ====================================================
         # HTTP Error
@@ -543,7 +546,7 @@ def scrape():
             error_type=error_type
         )
 
-    except requests.exceptions.RequestException as error:
+    except httpx.RequestError as error:
 
         # ====================================================
         # سایر Network / Request Errors
