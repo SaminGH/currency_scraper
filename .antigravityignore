@@ -23,3 +23,6 @@ environment/chromedriver-win64/
 # Version control & editor artifacts
 .git/
 .vscode/
+
+# todo
+todo.txt

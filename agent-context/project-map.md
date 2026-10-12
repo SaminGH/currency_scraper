@@ -15,6 +15,8 @@ Automated currency scraping, validation, aggregation, and publishing pipeline fo
 * `scraper_manager.py`: Hybrid asyncio + multiprocessing execution manager with timeouts, retries, and worker isolation for scrapers (asyncio for HTTP scrapers, multiprocessing for Selenium scrapers).
 * `scraper_output.py`: Aggregates outputs from `scraper_manager` across all sources by currency.
 * `validator.py`: Outlier detection (1% threshold) and data consistency checking.
+* `confidence_config.py`: Centralized configuration for confidence score thresholds (source count, dispersion, freshness).
+* `confidence.py`: Dedicated deterministic confidence score engine calculating quality ratings ("HIGH", "MEDIUM", "LOW").
 * `price_aggregator.py`: Computes average prices, confidence metrics, and publishability flags (>= 2 valid sources).
 * `change.py`: Calculates daily 24h price change percentage, delta, and 24h high/low price extremes relative to daily midnight baseline snapshots.
 * `database/__init__.py`: Public API interface for database operations.
@@ -28,7 +30,8 @@ main.py
   ├── database.get_connection() & database.create_snapshot()
   ├── scraper_output.py  ──> scraper_manager.py ──> scrapers/ (alanchand, bonbast, navasan, tgju)
   ├── validator.py       ──> filters outliers from scraper_output
-  ├── price_aggregator.py──> averages validated rates & assesses confidence
+  ├── price_aggregator.py──> averages validated rates
+  ├── confidence.py      ──> calculates deterministic confidence ("HIGH", "MEDIUM", "LOW")
   ├── change.py          ──> calculates 24h change & extremes against midnight baselines
   └── database.publish_snapshot()
         ├── save_source_health
@@ -41,6 +44,7 @@ main.py
 ## Common Task Locations
 * **Adding or updating a scraper**: `scrapers/<source_name>.py` and register in `scraper_manager.py` (`SCRAPERS` dict).
 * **Validation & outlier thresholds**: `validator.py` (`OUTLIER_THRESHOLD`).
+* **Confidence scoring & dispersion thresholds**: `confidence_config.py` and `confidence.py`.
 * **Aggregation & publish criteria**: `price_aggregator.py` (`publishable` logic).
 * **24h change calculation logic**: `change.py`.
 * **Database schema & persistence logic**: `database/*.py`.

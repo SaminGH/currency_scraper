@@ -1,9 +1,8 @@
 # Known Pitfalls & Constraints
 
-## 1. Top-Level Execution on Module Import
-* `scraper_output.py`, `validator.py`, and `price_aggregator.py` execute pipeline stages immediately upon module import.
-* **Impact**: Simply importing `scraper_output` triggers `scraper_manager.run_all()` and launches live browser/network scrapers.
-* **Caution**: Unit tests or ad-hoc scripts should be careful when importing these modules directly.
+## 1. Top-Level Execution on Module Import (Resolved)
+* Previously, `scraper_output.py`, `validator.py`, `price_aggregator.py`, and `main.py` executed pipeline stages immediately upon module import or had no functional entry points.
+* **Resolution**: Refactored in Phase 1 into modular functional entry points (`get_scraper_output`, `validate_prices`, `aggregate_prices`, and `main.run_pipeline`) with `if __name__ == '__main__':` guards. Importing these modules now produces zero side-effects.
 
 ## 2. Browser Automation & ChromeDriver Dependency
 * `scrapers/bonbast.py` and `scrapers/navasan.py` depend on the bundled binary at `environment/chromedriver-win64/chromedriver.exe`.

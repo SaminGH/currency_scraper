@@ -3,6 +3,9 @@
 ## Overview
 The system is an end-to-end currency scraping, processing, and publishing pipeline that collects live exchange rates from multiple Iranian financial market sources, validates and removes statistical outliers, computes aggregate prices and confidence scores, calculates 24-hour rate changes, and atomically persists results into a PostgreSQL database.
 
+## Goal
+The project goal is to run every minute in vps buy automation and fill the snapshots in the Postgresql every minute to refresh the website prices and changes every minute.
+
 ## High-Level Data Flow
 1. **Pipeline Initiation (`main.py`)**:
    - `logger.start_run()` generates a unique run ID.
@@ -39,8 +42,8 @@ The system is an end-to-end currency scraping, processing, and publishing pipeli
 
 ## External Systems & Integration Boundaries
 * **Target Sources**:
-  - `alanchand.com`: HTTP GET via `requests` + `BeautifulSoup` parsing.
-  - `tgju.org`: HTTP GET via `requests` + `BeautifulSoup` parsing with Arabic/Persian numeral conversion.
+  - `alanchand.com`: HTTP GET via `httpx` + `asyncio` parsing.
+  - `tgju.org`: HTTP GET via `httpx` + `asyncio` parsing with Arabic/Persian numeral conversion.
   - `bonbast.com`: Dynamic page scraping via `selenium.webdriver.Chrome` (headless).
   - `navasan.net`: Dynamic page scraping via `selenium.webdriver.Chrome` (headless).
 * **Storage**:

@@ -1,0 +1,9 @@
+Phase 1 (Refactoring Execution & Modules):
+Pak-سازی top-level execution dar scraper_output.py, validator.py, va price_aggregator.py va tabdil-e an-ha be توابع standard (run_validation(), run_aggregation(), etc.).
+Phase 2 (Database Resilience & Change Fallback):
+Rahandazi-ye Connection Pool dar database/connection.py.
+Ezafe kardane Graceful Fallback baraye DB-haye jadid (Cold Start) dar change.py.
+
+آماده‌سازی History API برای بازه‌های 1D / 7D / 30D
+
+پیاده‌سازی Confidence Score در Backend

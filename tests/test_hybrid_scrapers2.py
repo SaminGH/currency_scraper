@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Ensure parent directory is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 if __name__ == "__main__":
     import tests.test_hybrid_scrapers as t
     t.test_function_signatures()

@@ -1,30 +1,62 @@
-import logs.logger as logger
+import change
+import confidence
 import database
+import logs.logger as logger
+import price_aggregator
+import scraper_output
+import validator
 
 
-if __name__ == "__main__":
+from typing import Any, Dict, Optional
 
+
+def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
+    """
+    Execute the full currency scraping, validation, aggregation, and publishing pipeline.
+
+    Parameters:
+        connection: Optional database connection. If None, acquires one from database.get_connection().
+
+    Returns:
+        Publish result dictionary from database.publish_snapshot.
+    """
     logger.start_run()
     run_id = logger.get_run_id()
     logger.log_event(level="INFO", event="pipeline_started", component="main", run_id=run_id)
 
     snapshot_id = None
-    connection = None
+    own_connection = connection is None
 
     try:
-        connection = database.get_connection()
+        if own_connection:
+            connection = database.get_connection()
         snapshot_id = database.create_snapshot(run_id, connection=connection)
         logger.set_snapshot_id(snapshot_id)
-    
-        import scraper_output as scraper_output
-        import validator as validator
-        import price_aggregator as price_aggregator
-        import change as change
 
-        raw_prices = scraper_output.prices
-        source_status = getattr(scraper_output, "source_status", {})
-        validated_prices = validator.prices
-        final_prices = price_aggregator.final_prices
+        # 1. Scraper output
+        raw_prices, source_status = scraper_output.get_scraper_output()
+
+        # 2. Validation
+        validated_prices = validator.validate_prices(raw_prices)
+
+        # 3. Price aggregation
+        final_prices = price_aggregator.aggregate_prices(validated_prices)
+
+        # 3.1 Calculate deterministic confidence scores
+        for currency, data in final_prices.items():
+            if not isinstance(data, dict):
+                continue
+            currency_val_data = validated_prices.get(currency, {})
+            val_prices = currency_val_data.get("prices", {}) if isinstance(currency_val_data, dict) else {}
+            sources_total = data.get("sources_total", len(val_prices))
+            conf_result = confidence.calculate_confidence(
+                valid_prices=val_prices,
+                total_sources=sources_total,
+                snapshot_time=data.get("timestamp"),
+            )
+            data["confidence"] = conf_result["rating"]
+            data["confidence_reason"] = conf_result["score_reason"]
+            data["confidence_metrics"] = conf_result.get("metrics")
 
         removed_sources = {}
         for currency, data in validated_prices.items():
@@ -32,6 +64,7 @@ if __name__ == "__main__":
                 if data["removed_sources"]:
                     removed_sources[currency] = data["removed_sources"]
 
+        # 4. 24h Change calculation
         # Change calculation reads the previous committed snapshot and uses the
         # current prepared aggregate, which has not been persisted yet.
         change_24h = change.calculate_change_24h(
@@ -101,6 +134,7 @@ if __name__ == "__main__":
             "publishable_rates": len(published_rates),
         }
 
+        # 5. Database publish
         publish_result = database.publish_snapshot(
             snapshot_id=snapshot_id,
             run_id=run_id,
@@ -123,6 +157,8 @@ if __name__ == "__main__":
             currencies=len(final_prices),
             published_rates=publish_result["published_rates"],
         )
+
+        return publish_result
 
     except Exception as error:
         logger.log_event(
@@ -154,4 +190,12 @@ if __name__ == "__main__":
         raise
 
     finally:
-        database.close_connection()
+        if own_connection:
+            database.close_connection()
+
+
+main = run_pipeline
+
+
+if __name__ == "__main__":
+    run_pipeline()
