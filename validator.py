@@ -322,6 +322,7 @@ def validate_prices(source_prices: Dict[str, Any]) -> Dict[str, Any]:
                 # =================================================
                 # Log نتیجه Validation
                 # =================================================
+                remaining_count = len(valid_prices)
                 if remaining_count == 0:
                     logger.log_event(
                         level="ERROR",
