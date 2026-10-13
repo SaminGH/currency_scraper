@@ -204,7 +204,7 @@ def get_scraper_output(
                 # تعداد Source های موجود
                 # ------------------------------------------------
                 source_count = len(currency_prices)
-                total_sources = len(sources)
+                total_sources = len(scraper_manager.SCRAPERS)
 
                 # ------------------------------------------------
                 # ذخیره اطلاعات ارز

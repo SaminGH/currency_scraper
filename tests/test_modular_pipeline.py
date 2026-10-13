@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import confidence
 import scraper_output
@@ -72,12 +72,12 @@ class TestModularPipeline(unittest.TestCase):
             "source_b": 100500.0,
             "source_c": 100200.0,
         })
-        self.assertEqual(raw_prices["USD"]["source"], "3/3")
+        self.assertEqual(raw_prices["USD"]["source"], "3/4")
         self.assertEqual(raw_prices["EUR"]["prices"], {
             "source_a": 110000.0,
             "source_b": 110500.0,
         })
-        self.assertEqual(raw_prices["EUR"]["source"], "2/3")
+        self.assertEqual(raw_prices["EUR"]["source"], "2/4")
 
     def test_scraper_output_edge_cases(self):
         """Test get_scraper_output with edge cases like missing price key or invalid data dict."""
@@ -98,10 +98,10 @@ class TestModularPipeline(unittest.TestCase):
         # USD and EUR should have empty prices dictionary ('0/1')
         self.assertIn("USD", raw_prices)
         self.assertEqual(raw_prices["USD"]["prices"], {})
-        self.assertEqual(raw_prices["USD"]["source"], "0/1")
+        self.assertEqual(raw_prices["USD"]["source"], "0/4")
         self.assertIn("EUR", raw_prices)
         self.assertEqual(raw_prices["EUR"]["prices"], {})
-        self.assertEqual(raw_prices["EUR"]["source"], "0/1")
+        self.assertEqual(raw_prices["EUR"]["source"], "0/4")
 
     def test_scraper_output_error_fallback(self):
         """Test get_scraper_output fallback on fatal error."""
@@ -309,7 +309,12 @@ class TestModularPipeline(unittest.TestCase):
         mock_database,
     ):
         """Verify main.run_pipeline invokes stages in sequence and publishes snapshot."""
-        mock_database.get_connection.return_value = "fake_conn"
+        mock_conn = MagicMock()
+        mock_cursor_ctx = MagicMock()
+        mock_cursor_ctx.fetchone.return_value = (True,)
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor_ctx)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_database.get_connection.return_value = mock_conn
         mock_database.create_snapshot.return_value = "snap_123"
         mock_database.publish_snapshot.return_value = {
             "snapshot_id": "snap_123",

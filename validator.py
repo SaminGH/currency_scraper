@@ -301,10 +301,14 @@ def validate_prices(source_prices: Dict[str, Any]) -> Dict[str, Any]:
                         )
                         continue
 
+                remaining_count = len(valid_prices)
+
                 # =================================================
                 # تعیین Status
                 # =================================================
-                if removed_sources:
+                if remaining_count < 2:
+                    status = "not_publishable"
+                elif removed_sources:
                     status = "outlier_removed"
                 else:
                     status = "valid"
@@ -322,7 +326,6 @@ def validate_prices(source_prices: Dict[str, Any]) -> Dict[str, Any]:
                 # =================================================
                 # Log نتیجه Validation
                 # =================================================
-                remaining_count = len(valid_prices)
                 if remaining_count == 0:
                     logger.log_event(
                         level="ERROR",

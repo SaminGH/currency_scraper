@@ -2,7 +2,9 @@ from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+from bs4 import BeautifulSoup
 from pathlib import Path
 
 import logs.logger as logger
@@ -87,8 +89,16 @@ def scrape():
         # ساخت Driver
         # ====================================================
 
+        chrome_options = Options()
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--blink-settings=imagesEnabled=false")
+
         driver = webdriver.Chrome(
-            service=service
+            service=service,
+            options=chrome_options
         )
 
         driver.get(URL)
@@ -110,40 +120,33 @@ def scrape():
         )
 
         # ====================================================
-        # گرفتن قیمت تمام ارزها
+        # گرفتن page source و بستن driver
         # ====================================================
+
+        page_source = driver.page_source
+        driver.quit()
+        driver = None
+
+        # ====================================================
+        # پارس HTML با BeautifulSoup
+        # ====================================================
+
+        soup = BeautifulSoup(page_source, "html.parser")
 
         for currency in currencies:
 
             try:
 
                 # ------------------------------------------------
-                # Selector ارز
+                # استخراج قیمت با CSS Selector
                 # ------------------------------------------------
 
-                selector = (
-                    f'tr[data-code="{currency}"] td.price'
-                )
+                price_el = soup.select_one(f'tr[data-code="{currency}"] td.price')
 
-                # ------------------------------------------------
-                # صبر برای Load شدن قیمت همین ارز
-                # ------------------------------------------------
+                if price_el is None:
+                    raise ValueError("price_element_not_found")
 
-                wait.until(
-                    lambda d: d.find_element(
-                        By.CSS_SELECTOR,
-                        selector
-                    ).text.strip() != ""
-                )
-
-                # ------------------------------------------------
-                # دریافت قیمت
-                # ------------------------------------------------
-
-                price = driver.find_element(
-                    By.CSS_SELECTOR,
-                    selector
-                ).text.strip()
+                price = price_el.get_text(strip=True)
 
                 # ------------------------------------------------
                 # بررسی خالی نبودن قیمت
@@ -191,29 +194,6 @@ def scrape():
                 prices[currency.upper()] = {
                     "price": price
                 }
-
-            except TimeoutException as error:
-
-                # ----------------------------------------------
-                # Timeout فقط برای همین Currency
-                # ----------------------------------------------
-
-                errors[currency.upper()] = {
-                    "type": "currency_timeout",
-                    "message": str(error)
-                }
-
-                logger.log_event(
-                    level="WARNING",
-                    event="currency_failed",
-                    component=SOURCE_NAME,
-                    source=SOURCE_NAME,
-                    currency=currency.upper(),
-                    reason="timeout",
-                    error_type="currency_timeout"
-                )
-
-                continue
 
             except ValueError as error:
 

@@ -18,6 +18,7 @@ def create_snapshot(run_id, connection=None):
                 RETURNING id
             """, (run_id, datetime.now(), "running"))
             snapshot_id = cursor.fetchone()[0]
+        db.commit()
         logger.log_event(level="INFO", event="snapshot_created", component="database", snapshot_id=snapshot_id, run_id=run_id, status="running")
         return snapshot_id
     except Exception as error:

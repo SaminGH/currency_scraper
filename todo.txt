@@ -7,3 +7,15 @@ Ezafe kardane Graceful Fallback baraye DB-haye jadid (Cold Start) dar change.py.
 آماده‌سازی History API برای بازه‌های 1D / 7D / 30D
 
 پیاده‌سازی Confidence Score در Backend
+
+#check kardane remaining count
+#check kardan zaman change.py
+#check kardane validation be source count 2
+#check kardane morede 5om (total sources)
+#tozih bishtar darbare mohasebe tekrari confidence 
+#dorost kardan lock ke agar barname be har dalili bishtar az 60 sanie tol keshid dobare ejra nashe
+#dorost kardan connection database ke az avale barname baze dar sorati ke bayad faghat vaghti kare aggregation tamom shd baz beshe data befreste va bad baste she
+#log va database bayad ye script paksazi zamani dashte bashan baraye mesal log bad az 1 hafte faghat log haye dar sath warning ro negah dare va database data haye har 5 min ro
+
+
+#baraye migration be vps sakhtar selenium dar scraper ha bayad amade beshe

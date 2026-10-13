@@ -2,7 +2,9 @@ from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+from bs4 import BeautifulSoup
 import logs.logger as logger
 from pathlib import Path
 
@@ -114,8 +116,16 @@ def scrape():
         # ساخت Driver
         # ====================================================
 
+        chrome_options = Options()
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--blink-settings=imagesEnabled=false")
+
         driver = webdriver.Chrome(
-            service=service
+            service=service,
+            options=chrome_options
         )
 
         driver.get(URL)
@@ -137,8 +147,18 @@ def scrape():
         )
 
         # ====================================================
-        # گرفتن قیمت تمام ارزها
+        # گرفتن page source و بستن driver
         # ====================================================
+
+        page_source = driver.page_source
+        driver.quit()
+        driver = None
+
+        # ====================================================
+        # پارس HTML با BeautifulSoup
+        # ====================================================
+
+        soup = BeautifulSoup(page_source, "html.parser")
 
         for currency in currencies:
 
@@ -148,43 +168,14 @@ def scrape():
 
             try:
 
-                # ------------------------------------------------
-                # صبر می‌کنیم Buy و Sell این ارز Load شوند
-                # ------------------------------------------------
+                sell_el = soup.find(id=sell_id)
+                buy_el = soup.find(id=buy_id)
 
-                wait.until(
-                    lambda d: (
-                        d.find_element(
-                            By.ID,
-                            sell_id
-                        ).text.strip() != ""
+                if sell_el is None or buy_el is None:
+                    raise ValueError("buy_or_sell_element_not_found")
 
-                        and
-
-                        d.find_element(
-                            By.ID,
-                            buy_id
-                        ).text.strip() != ""
-                    )
-                )
-
-                # ------------------------------------------------
-                # دریافت Buy
-                # ------------------------------------------------
-
-                buy = driver.find_element(
-                    By.ID,
-                    buy_id
-                ).text.strip()
-
-                # ------------------------------------------------
-                # دریافت Sell
-                # ------------------------------------------------
-
-                sell = driver.find_element(
-                    By.ID,
-                    sell_id
-                ).text.strip()
+                sell = sell_el.get_text(strip=True)
+                buy = buy_el.get_text(strip=True)
 
                 # ------------------------------------------------
                 # بررسی خالی نبودن قیمت
@@ -261,29 +252,6 @@ def scrape():
                 prices[currency.upper()] = {
                     "price": price
                 }
-
-            except TimeoutException as error:
-
-                # ----------------------------------------------
-                # Timeout فقط برای همین Currency
-                # ----------------------------------------------
-
-                errors[currency.upper()] = {
-                    "type": "currency_timeout",
-                    "message": str(error)
-                }
-
-                logger.log_event(
-                    level="WARNING",
-                    event="currency_failed",
-                    component=SOURCE_NAME,
-                    source=SOURCE_NAME,
-                    currency=currency.upper(),
-                    reason="timeout",
-                    error_type="currency_timeout"
-                )
-
-                continue
 
             except Exception as error:
 

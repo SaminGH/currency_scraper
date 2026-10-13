@@ -4,6 +4,7 @@ import queue
 from dataclasses import dataclass
 import time
 
+import psutil
 import logs.logger as logger
 
 import scrapers.alanchand as alanchand
@@ -148,6 +149,24 @@ def _format_result(source, result):
         error_type="invalid_worker_result",
         message="worker returned invalid result",
     )
+
+
+# ============================================================
+# کشتن درخت Process برای جلوگیری از Zombie Chrome
+# ============================================================
+
+def _kill_process_tree(pid):
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        parent.kill()
+    except psutil.NoSuchProcess:
+        pass
 
 
 # ============================================================
@@ -456,7 +475,7 @@ async def _run_mp_source(source, scraper, run_id, snapshot_id):
 
                 if process.is_alive():
 
-                    process.terminate()
+                    _kill_process_tree(process.pid)
 
                     process.join(timeout=1)
 
@@ -499,7 +518,7 @@ async def _run_mp_source(source, scraper, run_id, snapshot_id):
 
         if process is not None and process.is_alive():
 
-            process.terminate()
+            _kill_process_tree(process.pid)
 
             process.join(timeout=1)
 

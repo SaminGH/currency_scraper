@@ -303,7 +303,7 @@ def calculate_daily_change_and_range(
             extremes: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
             if yesterday_snapshot_time:
                 window_start = yesterday_snapshot_time
-                window_end = today_snapshot_time or ref_time
+                window_end = ref_time
                 if window_start > window_end:
                     window_start, window_end = window_end, window_start
 

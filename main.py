@@ -30,6 +30,16 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
     try:
         if own_connection:
             connection = database.get_connection()
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(74839201);")
+            acquired = cursor.fetchone()[0]
+        if not acquired:
+            logger.log_event(level="WARNING", event="pipeline_skipped", component="main", reason="previous_run_still_in_progress")
+            if own_connection:
+                database.close_connection()
+            return {}
+
         snapshot_id = database.create_snapshot(run_id, connection=connection)
         logger.set_snapshot_id(snapshot_id)
 
@@ -190,6 +200,12 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
         raise
 
     finally:
+        if connection is not None:
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_unlock(74839201);")
+            except Exception:
+                pass
         if own_connection:
             database.close_connection()
 
