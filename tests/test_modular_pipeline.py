@@ -356,7 +356,12 @@ class TestModularPipeline(unittest.TestCase):
     @patch("main.scraper_output.get_scraper_output")
     def test_main_run_pipeline_failure(self, mock_get_scraper, mock_database):
         """Verify main.run_pipeline calls fail_snapshot and closes connection on exception."""
-        mock_database.get_connection.return_value = "fake_conn"
+        mock_conn = MagicMock()
+        mock_cursor_ctx = MagicMock()
+        mock_cursor_ctx.fetchone.return_value = (True,)
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor_ctx)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+        mock_database.get_connection.return_value = mock_conn
         mock_database.create_snapshot.return_value = "snap_fail"
         mock_get_scraper.side_effect = RuntimeError("Fatal scraper manager crash")
 
@@ -366,7 +371,7 @@ class TestModularPipeline(unittest.TestCase):
         mock_database.fail_snapshot.assert_called_once_with(
             snapshot_id="snap_fail",
             run_id=ANY,
-            connection="fake_conn",
+            connection=mock_conn,
         )
         mock_database.close_connection.assert_called_once()
 

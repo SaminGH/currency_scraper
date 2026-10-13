@@ -18,11 +18,10 @@ Automated currency scraping, validation, aggregation, and publishing pipeline fo
 * `confidence_config.py`: Centralized configuration for confidence score thresholds (source count, dispersion, freshness).
 * `confidence.py`: Dedicated deterministic confidence score engine calculating quality ratings ("HIGH", "MEDIUM", "LOW").
 * `price_aggregator.py`: Computes average prices, confidence metrics, and publishability flags (>= 2 valid sources).
-* `change.py`: Calculates daily 24h price change percentage, delta, and 24h high/low price extremes relative to daily midnight baseline snapshots.
+* `change.py`: Modular daily change and range engine (`calculate_daily_change`, `calculate_daily_high_low`, and `calculate_daily_change_and_range` / `calculate_change_24h`) with in-memory carry-forward caching, mid-day DB recovery, and calendar-day high/low extremes.
 * `database/__init__.py`: Public API interface for database operations.
 * `database/connection.py`: Reusable PostgreSQL connection provider using `psycopg2`.
 * `database/publisher.py`: Atomic transaction publisher managing savepoints and final snapshot completion.
-* `problem.txt`: Project backlog note stating `change.py bayad kamel eslah beshe`.
 
 ## Major Components & Relationships
 ```
