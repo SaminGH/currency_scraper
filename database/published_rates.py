@@ -35,16 +35,29 @@ def save_published_rates(snapshot_id, published_rates, connection=None):
                 change_24h = float(change_24h.replace("%", "").strip())
             except (ValueError, TypeError):
                 change_24h = None
-        rows.append((snapshot_id, currency_ids[currency], price, change_24h, sources_total, sources_used, data.get("confidence", "unknown")))
+        high_24h = data.get("high_24h")
+        if isinstance(high_24h, str):
+            try:
+                high_24h = float(high_24h.replace(",", "").strip())
+            except (ValueError, TypeError):
+                high_24h = None
+        low_24h = data.get("low_24h")
+        if isinstance(low_24h, str):
+            try:
+                low_24h = float(low_24h.replace(",", "").strip())
+            except (ValueError, TypeError):
+                low_24h = None
+        rows.append((snapshot_id, currency_ids[currency], price, change_24h, sources_total, sources_used, data.get("confidence", "unknown"), high_24h, low_24h))
     if rows:
         with db.cursor() as cursor:
             execute_values(cursor, """
                 INSERT INTO public.published_rates
-                    (snapshot_id, currency_id, price, change_24h, sources_total, sources_used, confidence)
+                    (snapshot_id, currency_id, price, change_24h, sources_total, sources_used, confidence, high_24h, low_24h)
                 VALUES %s
                 ON CONFLICT (snapshot_id, currency_id) DO UPDATE SET
                     price = EXCLUDED.price, change_24h = EXCLUDED.change_24h, sources_total = EXCLUDED.sources_total,
-                    sources_used = EXCLUDED.sources_used, confidence = EXCLUDED.confidence
+                    sources_used = EXCLUDED.sources_used, confidence = EXCLUDED.confidence,
+                    high_24h = EXCLUDED.high_24h, low_24h = EXCLUDED.low_24h
             """, rows)
     logger.log_event(level="INFO", event="published_rates_saved", component="database", snapshot_id=snapshot_id, currencies=len(rows))
     return len(rows)

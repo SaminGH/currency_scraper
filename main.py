@@ -90,6 +90,8 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
             published_data = dict(data)
             change_data = change_24h.get(currency)
             published_data["change_24h"] = change_data.get("change_24h") if isinstance(change_data, dict) else None
+            published_data["high_24h"] = change_data.get("high_24h") if isinstance(change_data, dict) else None
+            published_data["low_24h"] = change_data.get("low_24h") if isinstance(change_data, dict) else None
             published_rates[currency] = published_data
 
         sources_attempted = len(source_status)

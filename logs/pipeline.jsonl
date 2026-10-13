@@ -4901,3 +4901,8 @@
 {"timestamp": "2026-10-13T15:07:37", "run_id": "20261013-150701-8326", "snapshot_id": 31, "level": "INFO", "event": "snapshot_completed", "component": "database", "status": "completed"}
 {"timestamp": "2026-10-13T15:07:38", "run_id": "20261013-150701-8326", "snapshot_id": 31, "level": "INFO", "event": "publisher_committed", "component": "publisher", "status": "completed", "published_rates": 36}
 {"timestamp": "2026-10-13T15:07:38", "run_id": "20261013-150701-8326", "snapshot_id": 31, "level": "INFO", "event": "pipeline_completed", "component": "main", "currencies": 38, "published_rates": 36}
+{"timestamp": "2026-10-13T16:08:46", "run_id": "unknown-run", "snapshot_id": null, "level": "INFO", "event": "database_connection_success", "component": "database"}
+{"timestamp": "2026-10-13T16:09:24", "run_id": "unknown-run", "snapshot_id": null, "level": "INFO", "event": "database_connection_success", "component": "database"}
+{"timestamp": "2026-10-13T16:10:20", "run_id": "unknown-run", "snapshot_id": null, "level": "INFO", "event": "database_connection_success", "component": "database"}
+{"timestamp": "2026-10-13T16:10:21", "run_id": "unknown-run", "snapshot_id": null, "level": "INFO", "event": "currency_ids_loaded", "component": "database", "currencies": 37}
+{"timestamp": "2026-10-13T16:10:21", "run_id": "unknown-run", "snapshot_id": 1, "level": "INFO", "event": "published_rates_saved", "component": "database", "currencies": 1}
