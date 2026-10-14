@@ -6,7 +6,7 @@ Viizhegi-ha:
 - Har 60 saniye yekbar `main.run_pipeline()` ro seda mizane.
 - Moddate zamane ejraye har dor ro mohasebe mikone.
 - Agar yek dor masalan 15 saniye tool bekeshe, daghighan 45 saniye sabr mikone ta dore badi ras-e saniye 00 shoroo beshe.
-- Agar yek dor bishtar az 60 saniye tool bekeshe, bedone vaghfe mire dore badi (PostgreSQL Advisory Lock dar main.py az overlap jologiri mikone).
+- Agar yek dor bishtar az 60 saniye tool bekeshe, bedone vaghfe mire dore badi (Table-based locking dar public.snapshots az overlap jologiri mikone).
 - Ba zadan Ctrl+C be tore aramesh va tamiz khorooj mikone.
 """
 
@@ -44,7 +44,7 @@ def run_scheduler():
                     snap_id = result.get("snapshot_id")
                     print(f"  ✅ Run ba movafaghiat anjam shod! Snapshot: {snap_id} | Status: {status} | Published Rates: {pub_count}")
                 else:
-                    print("  ⚠️ Run skip shod (Advisory Lock fa'al bood ya ejraye ghabli dar jaryan ast).")
+                    print("  ⚠️ Run skip shod (Snapshot-e ghabli dar hal-e ejra ast ya kamtar az 3 daghighe gozashte).")
             except Exception as e:
                 print(f"  ❌ Khata dar ejraye pipeline: {e}")
 

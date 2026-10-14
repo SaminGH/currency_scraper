@@ -28,20 +28,23 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
     own_connection = connection is None
 
     try:
+        # Phase 1: Initialize
         if own_connection:
             connection = database.get_connection()
 
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT pg_try_advisory_lock(74839201);")
-            acquired = cursor.fetchone()[0]
-        if not acquired:
-            logger.log_event(level="WARNING", event="pipeline_skipped", component="main", reason="previous_run_still_in_progress")
+        snapshot_id = database.create_snapshot(run_id, connection=connection)
+        if snapshot_id is None:
+            logger.log_event(level="WARNING", event="pipeline_skipped", component="main", run_id=run_id, reason="previous_run_still_in_progress")
             if own_connection:
                 database.close_connection()
+                connection = None
             return {}
 
-        snapshot_id = database.create_snapshot(run_id, connection=connection)
         logger.set_snapshot_id(snapshot_id)
+
+        if own_connection:
+            database.close_connection()
+            connection = None
 
         # 1. Scraper output
         raw_prices, source_status = scraper_output.get_scraper_output()
@@ -73,6 +76,10 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
             if isinstance(data, dict) and isinstance(data.get("removed_sources"), dict):
                 if data["removed_sources"]:
                     removed_sources[currency] = data["removed_sources"]
+
+        # Phase 3: DB Read & Write
+        if own_connection:
+            connection = database.get_connection()
 
         # 4. 24h Change calculation
         # Change calculation reads the previous committed snapshot and uses the
@@ -182,8 +189,10 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
             reason=str(error)
         )
 
-        if snapshot_id and connection:
+        if snapshot_id:
             try:
+                if own_connection and (connection is None or getattr(connection, "closed", 0) != 0):
+                    connection = database.get_connection()
                 database.fail_snapshot(
                     snapshot_id=snapshot_id,
                     run_id=run_id,
@@ -202,13 +211,7 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
         raise
 
     finally:
-        if connection is not None:
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT pg_advisory_unlock(74839201);")
-            except Exception:
-                pass
-        if own_connection:
+        if own_connection and connection is not None:
             database.close_connection()
 
 

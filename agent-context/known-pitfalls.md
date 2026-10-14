@@ -21,10 +21,12 @@
 * In fresh databases or missing baseline snapshots, emits warnings once and gracefully yields `None` rather than failing.
 * Formatted strings (`+0.01%`) are accepted by `save_published_rates` and converted to float before inserting into the Postgres `numeric` column.
 
-## 5. PostgreSQL Global Connection & Transaction States
+## 5. PostgreSQL Connection Separation & Table-Based Locking
 * `database/connection.py` maintains a shared global connection (`CONNECTION_REUSE = True`).
 * In PostgreSQL, any failed query within a transaction puts the entire transaction in an aborted state (`current transaction is aborted, commands ignored until end of transaction block`).
 * Always wrap query executions in proper exception handling with `ROLLBACK` or use savepoints as implemented in `database/publisher.py`.
+* **Connection Separation**: Never hold an open database connection during the 30-60 second scraping window. Connections are closed after Phase 1 (`create_snapshot`) and reopened in Phase 3 (`calculate_change_24h` / `publish_snapshot`).
+* **Table-Based State Locking**: Pipeline concurrency is governed by `public.snapshots (status = 'running')` rather than session advisory locks. Stale runs (>= 180 seconds old) auto-recover to `status = 'failed'` automatically, preventing zombie lock deadlocks across pooler dropouts.
 
 ## 6. Numeral Formatting & Localization
 * Sites like `tgju.org` and `alanchand.com` render Persian numbers (`۰-۹`), Arabic numbers, Persian commas (`،`), or Latin commas in prices.
