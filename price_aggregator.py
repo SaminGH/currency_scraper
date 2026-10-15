@@ -48,6 +48,7 @@ def aggregate_prices(validated_prices: Dict[str, Any]) -> Dict[str, Any]:
                     valid_prices=source_prices,
                     total_sources=sources_total,
                     snapshot_time=timestamp,
+                    currency=currency,
                 )
 
                 final_prices[currency] = {

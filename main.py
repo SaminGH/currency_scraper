@@ -66,6 +66,7 @@ def run_pipeline(connection: Optional[Any] = None) -> Dict[str, Any]:
                 valid_prices=val_prices,
                 total_sources=sources_total,
                 snapshot_time=data.get("timestamp"),
+                currency=currency,
             )
             data["confidence"] = conf_result["rating"]
             data["confidence_reason"] = conf_result["score_reason"]

@@ -298,5 +298,67 @@ class TestConfidenceEngine(unittest.TestCase):
         self.assertEqual(row[6], "HIGH")
 
 
+    @patch("confidence.logger.log_event")
+    def test_detailed_logging_reasons(self, mock_log_event):
+        """Verify detailed structured logging explains why each currency is HIGH, MEDIUM, or LOW."""
+        # 1. HIGH rating log verification
+        prices_high = {"s1": 100000.0, "s2": 100100.0, "s3": 100050.0}
+        confidence.calculate_confidence(prices_high, total_sources=4, currency="USD")
+        mock_log_event.assert_called()
+        high_kwargs = mock_log_event.call_args[1]
+        self.assertEqual(high_kwargs["event"], "confidence_evaluated")
+        self.assertEqual(high_kwargs["currency"], "USD")
+        self.assertEqual(high_kwargs["rating"], "HIGH")
+        self.assertEqual(high_kwargs["level"], "INFO")
+        self.assertIn("rated HIGH", high_kwargs["reason_detail"])
+        self.assertEqual(high_kwargs["valid_sources"], 3)
+        self.assertEqual(high_kwargs["total_sources"], 4)
+        self.assertIsNotNone(high_kwargs["dispersion_pct"])
+
+        # 2. MEDIUM rating due to moderate dispersion log verification
+        mock_log_event.reset_mock()
+        prices_med = {"s1": 100000.0, "s2": 100400.0, "s3": 100200.0}
+        confidence.calculate_confidence(prices_med, total_sources=4, currency="EUR")
+        med_kwargs = mock_log_event.call_args[1]
+        self.assertEqual(med_kwargs["currency"], "EUR")
+        self.assertEqual(med_kwargs["rating"], "MEDIUM")
+        self.assertIn("degraded to MEDIUM", med_kwargs["reason_detail"])
+
+        # 3. LOW rating due to excessive dispersion log verification
+        mock_log_event.reset_mock()
+        prices_low_disp = {"s1": 100000.0, "s2": 102000.0, "s3": 101000.0}
+        confidence.calculate_confidence(prices_low_disp, total_sources=4, currency="GBP")
+        low_disp_kwargs = mock_log_event.call_args[1]
+        self.assertEqual(low_disp_kwargs["currency"], "GBP")
+        self.assertEqual(low_disp_kwargs["rating"], "LOW")
+        self.assertEqual(low_disp_kwargs["level"], "WARNING")
+        self.assertIn("exceeds maximum allowable threshold", low_disp_kwargs["reason_detail"])
+
+        # 4. LOW rating due to insufficient sources (< 2)
+        mock_log_event.reset_mock()
+        confidence.calculate_confidence({"s1": 100000.0}, total_sources=4, currency="AED")
+        low_src_kwargs = mock_log_event.call_args[1]
+        self.assertEqual(low_src_kwargs["currency"], "AED")
+        self.assertEqual(low_src_kwargs["rating"], "LOW")
+        self.assertEqual(low_src_kwargs["valid_sources"], 1)
+        self.assertIn("below minimum threshold", low_src_kwargs["reason_detail"])
+
+        # 5. Stale data degradation log verification
+        mock_log_event.reset_mock()
+        base_time = datetime(2026, 10, 12, 14, 0, 0)
+        stale_ts = {"s1": base_time - timedelta(seconds=5000)}
+        confidence.calculate_confidence(
+            prices_high,
+            total_sources=4,
+            snapshot_time=base_time,
+            source_timestamps=stale_ts,
+            currency="JPY",
+        )
+        stale_kwargs = mock_log_event.call_args[1]
+        self.assertEqual(stale_kwargs["currency"], "JPY")
+        self.assertTrue(stale_kwargs["is_stale"])
+        self.assertIn("Stale data", stale_kwargs["reason_detail"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,8 @@ def calculate_confidence(
     snapshot_time: Optional[Union[datetime, str]] = None,
     source_timestamps: Optional[Dict[str, Any]] = None,
     config: Optional[ConfidenceConfig] = None,
+    currency: Optional[str] = None,
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """
     Evaluates quality confidence rating for a single currency rate.
@@ -72,6 +74,7 @@ def calculate_confidence(
         snapshot_time: Optional timestamp of current pipeline run.
         source_timestamps: Optional dictionary of source timestamps.
         config: Optional ConfidenceConfig override. Defaults to DEFAULT_CONFIG.
+        currency: Optional currency code string (e.g. 'USD', 'EUR') for telemetry.
 
     Returns:
         dict: {
@@ -85,6 +88,7 @@ def calculate_confidence(
         }
     """
     cfg = config or DEFAULT_CONFIG
+    curr = currency or kwargs.get("currency") or kwargs.get("currency_code")
 
     try:
         # ========================================================
@@ -106,6 +110,28 @@ def calculate_confidence(
         # ========================================================
         if valid_count < cfg.min_valid_sources_medium:
             score_reason = "insufficient_valid_sources" if valid_count > 0 else "no_valid_sources"
+            reason_detail = (
+                f"Valid source count ({valid_count}/{total_sources_count}) is below minimum "
+                f"threshold ({cfg.min_valid_sources_medium}) required for MEDIUM/HIGH confidence -> rated LOW"
+            ) if valid_count > 0 else (
+                f"No valid sources available (0/{total_sources_count}) -> rated LOW"
+            )
+
+            log_kwargs = {
+                "level": "INFO" if valid_count > 0 else "WARNING",
+                "event": "confidence_evaluated",
+                "component": "confidence",
+                "rating": "LOW",
+                "score_reason": score_reason,
+                "reason_detail": reason_detail,
+                "valid_sources": valid_count,
+                "total_sources": total_sources_count,
+                "dispersion_pct": None,
+            }
+            if curr:
+                log_kwargs["currency"] = curr
+            logger.log_event(**log_kwargs)
+
             return {
                 "rating": "LOW",
                 "score_reason": score_reason,
@@ -130,12 +156,23 @@ def calculate_confidence(
         mean_price = sum(price_values) / len(price_values)
 
         if mean_price == 0:
-            logger.log_event(
-                level="WARNING",
-                event="confidence_mean_zero",
-                component="confidence",
-                reason="mean_price_is_zero",
-            )
+            reason_detail = "Mean price is 0; cannot evaluate dispersion -> rated LOW"
+            log_kwargs = {
+                "level": "WARNING",
+                "event": "confidence_evaluated",
+                "component": "confidence",
+                "rating": "LOW",
+                "score_reason": "mean_price_is_zero",
+                "reason_detail": reason_detail,
+                "valid_sources": valid_count,
+                "total_sources": total_sources_count,
+                "dispersion_pct": None,
+                "mean_price": 0.0,
+            }
+            if curr:
+                log_kwargs["currency"] = curr
+            logger.log_event(**log_kwargs)
+
             return {
                 "rating": "LOW",
                 "score_reason": "mean_price_is_zero",
@@ -155,24 +192,48 @@ def calculate_confidence(
             if dispersion <= cfg.max_dispersion_high:
                 current_rating = "HIGH"
                 score_reason = "valid_sources_above_threshold_low_dispersion"
+                reason_detail = (
+                    f"Valid sources ({valid_count}/{total_sources_count}) >= {cfg.min_valid_sources_high} "
+                    f"and dispersion ({dispersion:.4%}) <= {cfg.max_dispersion_high:.2%} -> rated HIGH"
+                )
             elif dispersion <= cfg.max_dispersion_medium:
                 current_rating = "MEDIUM"
                 score_reason = "moderate_dispersion_degraded_to_medium"
+                reason_detail = (
+                    f"Valid sources ({valid_count}/{total_sources_count}) >= {cfg.min_valid_sources_high} "
+                    f"but dispersion ({dispersion:.4%}) exceeds high threshold ({cfg.max_dispersion_high:.2%}) "
+                    f"(<= {cfg.max_dispersion_medium:.2%}) -> degraded to MEDIUM"
+                )
             else:
                 current_rating = "LOW"
                 score_reason = "excessive_dispersion_degraded_to_low"
+                reason_detail = (
+                    f"Valid sources ({valid_count}/{total_sources_count}) >= {cfg.min_valid_sources_high} "
+                    f"but dispersion ({dispersion:.4%}) exceeds maximum allowable threshold "
+                    f"({cfg.max_dispersion_medium:.2%}) -> degraded to LOW"
+                )
         else:  # potential_rating == "MEDIUM" (e.g. 2 sources)
             if dispersion <= cfg.max_dispersion_medium:
                 current_rating = "MEDIUM"
                 score_reason = "two_valid_sources_acceptable_dispersion"
+                reason_detail = (
+                    f"Valid sources ({valid_count}/{total_sources_count}) == {cfg.min_valid_sources_medium} "
+                    f"with acceptable dispersion ({dispersion:.4%} <= {cfg.max_dispersion_medium:.2%}) -> rated MEDIUM"
+                )
             else:
                 current_rating = "LOW"
                 score_reason = "excessive_dispersion_degraded_to_low"
+                reason_detail = (
+                    f"Valid sources ({valid_count}/{total_sources_count}) == {cfg.min_valid_sources_medium} "
+                    f"but dispersion ({dispersion:.4%}) exceeds maximum allowable threshold "
+                    f"({cfg.max_dispersion_medium:.2%}) -> degraded to LOW"
+                )
 
         # ========================================================
         # 4. Freshness Evaluation
         # ========================================================
         max_age: Optional[float] = None
+        is_stale: bool = False
         if source_timestamps and isinstance(source_timestamps, dict):
             snap_dt = _parse_timestamp(snapshot_time) or datetime.now()
             valid_ages = []
@@ -189,6 +250,8 @@ def calculate_confidence(
             if valid_ages:
                 max_age = max(valid_ages)
                 if max_age > cfg.max_age_seconds:
+                    is_stale = True
+                    old_rating = current_rating
                     # Degrading tier due to stale data
                     if current_rating == "HIGH":
                         current_rating = "MEDIUM"
@@ -199,8 +262,13 @@ def calculate_confidence(
                     else:
                         score_reason = f"{score_reason}_stale_data"
 
+                    reason_detail += (
+                        f"; Stale data: max source age ({max_age:.1f}s) exceeds threshold "
+                        f"({cfg.max_age_seconds:.0f}s) -> degraded from {old_rating} to {current_rating}"
+                    )
+
         # ========================================================
-        # 5. Deterministic Rating Output
+        # 5. Telemetry & Deterministic Rating Output
         # ========================================================
         metrics: Dict[str, Any] = {
             "valid_sources_count": valid_count,
@@ -210,6 +278,33 @@ def calculate_confidence(
         if max_age is not None:
             metrics["max_age_seconds"] = round(max_age, 2)
 
+        log_level = "INFO" if current_rating in ("HIGH", "MEDIUM") else "WARNING"
+        log_kwargs = {
+            "level": log_level,
+            "event": "confidence_evaluated",
+            "component": "confidence",
+            "rating": current_rating,
+            "score_reason": score_reason,
+            "reason_detail": reason_detail,
+            "valid_sources": valid_count,
+            "total_sources": total_sources_count,
+            "dispersion_pct": round(dispersion, 6),
+            "dispersion_threshold_high": cfg.max_dispersion_high,
+            "dispersion_threshold_medium": cfg.max_dispersion_medium,
+            "mean_price": round(mean_price, 4),
+            "min_price": min_price,
+            "max_price": max_price,
+            "spread": round(max_price - min_price, 4),
+        }
+        if max_age is not None:
+            log_kwargs["max_age_seconds"] = round(max_age, 2)
+            log_kwargs["freshness_threshold"] = cfg.max_age_seconds
+            log_kwargs["is_stale"] = is_stale
+        if curr:
+            log_kwargs["currency"] = curr
+
+        logger.log_event(**log_kwargs)
+
         return {
             "rating": current_rating,
             "score_reason": score_reason,
@@ -217,12 +312,20 @@ def calculate_confidence(
         }
 
     except Exception as error:
-        logger.log_event(
-            level="ERROR",
-            event="confidence_calculation_failed",
-            component="confidence",
-            reason=str(error),
-        )
+        log_kwargs = {
+            "level": "ERROR",
+            "event": "confidence_calculation_failed",
+            "component": "confidence",
+            "rating": "LOW",
+            "reason": str(error),
+            "reason_detail": f"Confidence evaluation failed due to unexpected error: {str(error)}",
+            "valid_sources": len(valid_prices) if isinstance(valid_prices, dict) else 0,
+            "total_sources": total_sources if isinstance(total_sources, int) else 0,
+        }
+        if curr:
+            log_kwargs["currency"] = curr
+        logger.log_event(**log_kwargs)
+
         return {
             "rating": "LOW",
             "score_reason": f"calculation_error: {str(error)}",
