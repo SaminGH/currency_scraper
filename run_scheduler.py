@@ -10,11 +10,22 @@ Viizhegi-ha:
 - Ba zadan Ctrl+C be tore aramesh va tamiz khorooj mikone.
 """
 
+import signal
 import sys
 import time
 from datetime import datetime
 
 import main
+
+
+def _sigterm_handler(signum, frame):
+    raise KeyboardInterrupt
+
+
+try:
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+except (AttributeError, ValueError):
+    pass
 
 
 INTERVAL_SECONDS = 60

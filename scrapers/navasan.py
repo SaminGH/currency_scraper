@@ -4,8 +4,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
+import os
 from bs4 import BeautifulSoup
-from pathlib import Path
 
 import logs.logger as logger
 
@@ -16,10 +16,20 @@ import logs.logger as logger
 
 SOURCE_NAME = "navasan"
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-SERVICE_FILE = BASE_DIR / "environment" / "chromedriver-win64" / "chromedriver.exe"
 
-service = Service(executable_path=str(SERVICE_FILE))
+def get_service():
+    """
+    Instantiate ChromeDriver Service dynamically.
+    Relies on system PATH (e.g. /usr/bin/chromedriver on Linux),
+    or uses CHROMEDRIVER_PATH environment variable if specified.
+    """
+    chromedriver_path = os.environ.get("CHROMEDRIVER_PATH", "").strip().strip("\"'").strip()
+    if chromedriver_path:
+        return Service(executable_path=chromedriver_path)
+    return Service()
+
+
+service = get_service()
 
 URL = "https://www.navasan.net/"
 
@@ -96,8 +106,12 @@ def scrape():
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--blink-settings=imagesEnabled=false")
 
+        chrome_bin = os.environ.get("CHROME_BIN", "").strip().strip("\"'").strip() or os.environ.get("CHROME_PATH", "").strip().strip("\"'").strip()
+        if chrome_bin:
+            chrome_options.binary_location = chrome_bin
+
         driver = webdriver.Chrome(
-            service=service,
+            service=get_service(),
             options=chrome_options
         )
 
@@ -124,8 +138,12 @@ def scrape():
         # ====================================================
 
         page_source = driver.page_source
-        driver.quit()
-        driver = None
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        finally:
+            driver = None
 
         # ====================================================
         # پارس HTML با BeautifulSoup
@@ -337,8 +355,11 @@ def scrape():
         # ====================================================
 
         if driver is not None:
-
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception:
+                pass
+            driver = None
 
     # ========================================================
     # Contract خروجی استاندارد Scraper

@@ -4,14 +4,19 @@
 * Previously, `scraper_output.py`, `validator.py`, `price_aggregator.py`, and `main.py` executed pipeline stages immediately upon module import or had no functional entry points.
 * **Resolution**: Refactored in Phase 1 into modular functional entry points (`get_scraper_output`, `validate_prices`, `aggregate_prices`, and `main.run_pipeline`) with `if __name__ == '__main__':` guards. Importing these modules now produces zero side-effects.
 
-## 2. Browser Automation & ChromeDriver Dependency
-* `scrapers/bonbast.py` and `scrapers/navasan.py` depend on the bundled binary at `environment/chromedriver-win64/chromedriver.exe`.
-* The ChromeDriver version must remain compatible with the installed host Google Chrome browser.
-* Headless mode and anti-bot/Cloudflare challenges on target sites (e.g., bonbast) can lead to timeouts or empty tables.
+## 2. Browser Automation & ChromeDriver Dependency (Migrated to Linux)
+* `scrapers/bonbast.py` and `scrapers/navasan.py` dynamically resolve ChromeDriver via Linux system `PATH` (e.g., `/usr/bin/chromedriver` from `chromium-chromedriver`), or through optional `CHROMEDRIVER_PATH` environment variable override. Hardcoded Windows paths have been removed. Optional `CHROME_BIN` / `CHROME_PATH` environment variables can specify custom browser binary locations.
+* Headless Linux VPS execution requires mandatory flags: `--headless=new`, `--no-sandbox`, `--disable-dev-shm-usage`, `--disable-gpu`, and `--blink-settings=imagesEnabled=false`.
+* `driver.quit()` must always be guarded in `finally` blocks to guarantee browser processes close even on network errors or timeouts.
+* **Systemd Service Environment & User Profile Permissions**: Under service users without standard home directories (e.g., `User=www-data`), Chromium attempts to create profile data in `/nonexistent` or `/var/www`, failing with `SingletonLock` errors. Systemd unit `currency-pipeline.service` specifies `Environment="HOME=/tmp"` and `PrivateTmp=true` to grant Chromium an isolated, writable profile directory.
+* Cloudflare or anti-bot challenges on target sites (e.g., bonbast) can lead to timeouts or empty tables; handled via retry isolation.
 
-## 3. Multiprocessing on Windows
-* Python on Windows uses the `spawn` start method rather than `fork`.
-* Any sub-processes spawned by `multiprocessing` must import top-level code cleanly. Guard conditions (`if __name__ == '__main__':`) or isolated worker functions are essential to avoid infinite recursion or unexpected side-effects.
+## 3. Multiprocessing on Linux & Zombie Process Prevention
+* Multiprocessing scrapers run in isolated processes with dedicated queues.
+* On Linux, abnormal process termination, worker timeouts, or unhandled exceptions can leave orphaned Chrome or ChromeDriver processes reparented to init or lingering as zombie `<defunct>` entries.
+* **Resolution**: `scraper_manager.py` implements recursive process-tree termination (`_kill_process_tree`) via `psutil`, killing child browser processes before parent workers, reaping them with a two-pass `psutil.wait_procs()`, and guarding against self-termination (`pid == os.getpid()`).
+* **Worker Process Isolation & Cleanup Timing**: The worker process itself performs a two-pass child termination and reaping in its `finally` block before exiting. To avoid a race condition where the manager's `finally` block kills a cleanly completing worker that is waiting up to 1.0s to reap child processes, the manager allows a 2.0s join window upon receiving the result before considering the worker stuck.
+* In systemd deployment, `KillMode=mixed` is configured to ensure any stray child processes in the control group receive SIGKILL upon service stop or restart.
 
 ## 4. 24-Hour Change & Daily Extremes (`change.py`)
 * Compares daily midnight baseline snapshots (first valid snapshot >= 00:00:00 of today vs yesterday, with fallback to latest prior snapshot).

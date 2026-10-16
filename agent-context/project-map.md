@@ -6,8 +6,10 @@ Automated currency scraping, validation, aggregation, and publishing pipeline fo
 ## Important Directories
 * `scrapers/`: Individual web scrapers for each market source (`alanchand.py`, `bonbast.py`, `navasan.py`, `tgju.py`).
 * `database/`: PostgreSQL persistence layer (connection, models, queries, savepoints, atomic publishing) guided in supabase.
-* `environment/`: Environment configuration (`.env.example`), Python dependencies (`requirements.txt`), and bundled ChromeDriver binary.
+* `environment/`: Environment configuration (`.env.example`) and Python dependencies (`requirements.txt`).
 * `logs/`: Structured event logging utilities (`logger.py`) and log output (`pipeline.jsonl`).
+* `scripts/`: Provisioning and deployment scripts (`setup_linux.sh` for Ubuntu/Debian).
+* `deployment/`: Production systemd daemon units (`currency-pipeline.service`).
 * `agent-context/`: Operational agent context and knowledge files.
 
 ## Important Files & Entry Points

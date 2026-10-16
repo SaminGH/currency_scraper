@@ -3,6 +3,7 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 import httpx
+from selenium.common.exceptions import TimeoutException
 
 # Ensure parent directory is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -244,10 +245,21 @@ def test_scrapers_dict_dispatch_override():
             "errors": {},
         }
 
-    with patch.dict(scraper_manager.SCRAPERS, {"tgju": mock_tgju}):
+    with patch.dict(scraper_manager.SCRAPERS, {"tgju": mock_tgju}, clear=True), \
+         patch.dict(scraper_manager.ASYNC_SCRAPERS, {"tgju": mock_tgju}, clear=True), \
+         patch.dict(scraper_manager.MULTIPROCESS_SCRAPERS, {}, clear=True):
         res = asyncio.run(scraper_manager._run_all_async())
         assert mock_called, "Overriding SCRAPERS['tgju'] must be respected by _run_all_async"
         assert res["tgju"]["prices"]["USD"]["price"] == 12345
+
+
+def _mock_sync_worker():
+    return {
+        "source": "mock_sync",
+        "status": "complete",
+        "prices": {},
+        "errors": {},
+    }
 
 
 def test_run_all_in_running_event_loop():
@@ -259,27 +271,22 @@ def test_run_all_in_running_event_loop():
             "errors": {},
         }
 
-    def mock_sync():
-        return {
-            "source": "mock_sync",
-            "status": "complete",
-            "prices": {},
-            "errors": {},
-        }
-
     test_scrapers = {
         "mock_src": mock_async,
+        "mock_sync": _mock_sync_worker,
     }
 
     async def runner():
         with patch.dict(scraper_manager.SCRAPERS, test_scrapers, clear=True), \
              patch.dict(scraper_manager.ASYNC_SCRAPERS, {"mock_src": mock_async}, clear=True), \
-             patch.dict(scraper_manager.MULTIPROCESS_SCRAPERS, {}, clear=True):
+             patch.dict(scraper_manager.MULTIPROCESS_SCRAPERS, {"mock_sync": _mock_sync_worker}, clear=True):
             return scraper_manager.run_all()
 
     res = asyncio.run(runner())
     assert "mock_src" in res
     assert res["mock_src"]["status"] == "complete"
+    assert "mock_sync" in res
+    assert res["mock_sync"]["status"] == "complete"
 
 
 def test_mp_source_process_spawn_failure():
@@ -287,6 +294,148 @@ def test_mp_source_process_spawn_failure():
         res = asyncio.run(scraper_manager._run_mp_source("fail_spawn", MagicMock(), "run1", "snap1"))
         assert res["status"] == "failed"
         assert res["errors"]["_scraper"]["type"] == "manager_exception"
+
+
+def _get_service_path(svc):
+    return getattr(svc, "executable_path", getattr(svc, "path", None))
+
+
+def test_bonbast_dynamic_service():
+    with patch.dict(os.environ, {}, clear=True):
+        svc = bonbast.get_service()
+        assert svc is not None
+
+    with patch.dict(os.environ, {"CHROMEDRIVER_PATH": "/opt/custom/chromedriver"}):
+        svc = bonbast.get_service()
+        assert _get_service_path(svc) == "/opt/custom/chromedriver"
+
+    with patch.dict(os.environ, {"CHROMEDRIVER_PATH": " '\" /opt/custom/chromedriver \"' "}):
+        svc = bonbast.get_service()
+        assert _get_service_path(svc) == "/opt/custom/chromedriver"
+
+    with patch.dict(os.environ, {"CHROMEDRIVER_PATH": "   "}):
+        svc = bonbast.get_service()
+        assert _get_service_path(svc) != "   "
+
+
+def test_navasan_dynamic_service():
+    with patch.dict(os.environ, {}, clear=True):
+        svc = navasan.get_service()
+        assert svc is not None
+
+    with patch.dict(os.environ, {"CHROMEDRIVER_PATH": "/usr/bin/chromedriver"}):
+        svc = navasan.get_service()
+        assert _get_service_path(svc) == "/usr/bin/chromedriver"
+
+    with patch.dict(os.environ, {"CHROMEDRIVER_PATH": " '\" /usr/bin/chromedriver \"' "}):
+        svc = navasan.get_service()
+        assert _get_service_path(svc) == "/usr/bin/chromedriver"
+
+    with patch.dict(os.environ, {"CHROMEDRIVER_PATH": "   "}):
+        svc = navasan.get_service()
+        assert _get_service_path(svc) != "   "
+
+
+def test_headless_chrome_options():
+    required_flags = {
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--blink-settings=imagesEnabled=false",
+    }
+
+    # Verify bonbast options
+    with patch("selenium.webdriver.Chrome") as mock_chrome:
+        mock_driver = MagicMock()
+        mock_driver.page_source = "<html></html>"
+        mock_chrome.return_value = mock_driver
+        with patch.object(bonbast, "currencies", []):
+            bonbast.scrape()
+        assert mock_chrome.called
+        options = mock_chrome.call_args[1]["options"]
+        for flag in required_flags:
+            assert flag in options.arguments, f"bonbast missing flag: {flag}"
+
+    # Verify navasan options
+    with patch("selenium.webdriver.Chrome") as mock_chrome:
+        mock_driver = MagicMock()
+        mock_driver.page_source = "<html></html>"
+        mock_chrome.return_value = mock_driver
+        with patch.object(navasan, "currencies", []):
+            navasan.scrape()
+        assert mock_chrome.called
+        options = mock_chrome.call_args[1]["options"]
+        for flag in required_flags:
+            assert flag in options.arguments, f"navasan missing flag: {flag}"
+
+
+def test_driver_quit_called_on_exception():
+    # Verify bonbast calls driver.quit() in finally block on exception
+    with patch("selenium.webdriver.Chrome") as mock_chrome:
+        mock_driver = MagicMock()
+        mock_driver.get.side_effect = TimeoutException("Page load timed out")
+        mock_chrome.return_value = mock_driver
+        res = bonbast.scrape()
+        assert res["status"] == "failed"
+        assert mock_driver.quit.called, "bonbast: driver.quit() must be called on exception in finally block"
+
+    # Verify navasan calls driver.quit() in finally block on exception
+    with patch("selenium.webdriver.Chrome") as mock_chrome:
+        mock_driver = MagicMock()
+        mock_driver.get.side_effect = TimeoutException("Page load timed out")
+        mock_chrome.return_value = mock_driver
+        res = navasan.scrape()
+        assert res["status"] == "failed"
+        assert mock_driver.quit.called, "navasan: driver.quit() must be called on exception in finally block"
+
+
+def test_kill_process_tree_hygiene():
+    # 1. Invalid or boundary PIDs (including current process PID) should be no-ops
+    scraper_manager._kill_process_tree(None)
+    scraper_manager._kill_process_tree(0)
+    scraper_manager._kill_process_tree(1)
+    scraper_manager._kill_process_tree(-1)
+    scraper_manager._kill_process_tree(True)
+    scraper_manager._kill_process_tree(False)
+    scraper_manager._kill_process_tree("not_an_int")
+    scraper_manager._kill_process_tree(os.getpid())
+
+    # 2. Mock process tree kill
+    mock_parent = MagicMock()
+    mock_child1 = MagicMock()
+    mock_child2 = MagicMock()
+    mock_parent.children.return_value = [mock_child1, mock_child2]
+
+    with patch("psutil.Process", return_value=mock_parent) as mock_psutil_proc, \
+         patch("psutil.wait_procs", return_value=([mock_child1, mock_child2, mock_parent], [])) as mock_wait:
+        scraper_manager._kill_process_tree(12345)
+        mock_psutil_proc.assert_called_once_with(12345)
+        mock_child1.kill.assert_called()
+        mock_child2.kill.assert_called()
+        mock_parent.kill.assert_called()
+        mock_wait.assert_called_once()
+
+    # 3. AccessDenied on children lookup should still kill parent
+    mock_parent_denied = MagicMock()
+    import psutil
+    mock_parent_denied.children.side_effect = psutil.AccessDenied()
+    with patch("psutil.Process", return_value=mock_parent_denied):
+        scraper_manager._kill_process_tree(12346)
+        mock_parent_denied.kill.assert_called()
+
+    # 4. Multi-pass kill when stubborn processes linger after first wait_procs
+    stubborn_proc = MagicMock()
+    mock_parent_stubborn = MagicMock()
+    mock_parent_stubborn.children.return_value = [stubborn_proc]
+    with patch("psutil.Process", return_value=mock_parent_stubborn), \
+         patch("psutil.wait_procs", side_effect=[
+             ([mock_parent_stubborn], [stubborn_proc]),  # first pass: stubborn_proc still alive
+             ([stubborn_proc], [])  # second pass: stubborn_proc reaped
+         ]) as mock_multi_wait:
+        scraper_manager._kill_process_tree(12347)
+        assert mock_multi_wait.call_count == 2
+        stubborn_proc.kill.assert_called()
 
 
 if __name__ == "__main__":
@@ -301,4 +450,9 @@ if __name__ == "__main__":
     test_scrapers_dict_dispatch_override()
     test_run_all_in_running_event_loop()
     test_mp_source_process_spawn_failure()
+    test_bonbast_dynamic_service()
+    test_navasan_dynamic_service()
+    test_headless_chrome_options()
+    test_driver_quit_called_on_exception()
+    test_kill_process_tree_hygiene()
     print("ALL UNIT TESTS PASSED SUCCESSFULLY!")

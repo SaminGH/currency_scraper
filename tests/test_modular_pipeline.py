@@ -1,6 +1,11 @@
+import os
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, MagicMock, patch
+
+# Ensure parent directory is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import confidence
 import database.snapshot as snapshot_module

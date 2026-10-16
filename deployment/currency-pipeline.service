@@ -1,0 +1,51 @@
+[Unit]
+Description=Currency Scraping and Aggregation Pipeline Daemon
+Documentation=https://github.com/your-org/currency-pipeline
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# User and Group under which the service runs.
+# Change to the application deployment user (e.g. www-data, ubuntu, or dedicated service account).
+User=www-data
+Group=www-data
+
+# Working Directory containing the application codebase
+WorkingDirectory=/opt/currency-pipeline
+
+# Load environment variables from environment/.env if present
+EnvironmentFile=-/opt/currency-pipeline/environment/.env
+
+# Environment configuration
+Environment=PYTHONUNBUFFERED=1
+Environment="HOME=/tmp"
+Environment="PATH=/opt/currency-pipeline/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Optional: explicitly set CHROMEDRIVER_PATH or CHROME_BIN if not using default system PATH
+# Environment=CHROMEDRIVER_PATH=/usr/bin/chromedriver
+# Environment=CHROME_BIN=/usr/bin/chromium-browser
+
+# Command to execute (uses project virtual environment)
+ExecStart=/opt/currency-pipeline/.venv/bin/python run_scheduler.py
+
+# Restart policy on failure or unhandled exit
+Restart=always
+RestartSec=10
+
+# Process lifecycle and cleanup hygiene:
+# KillMode=mixed sends SIGTERM to the main scheduler process and SIGKILL to any
+# remaining child processes (e.g., Chrome, ChromeDriver) to prevent zombies.
+KillMode=mixed
+TimeoutStopSec=30
+
+# Logging to systemd journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=currency-pipeline
+
+# Sandboxing and security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

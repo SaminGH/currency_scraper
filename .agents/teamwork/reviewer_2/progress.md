@@ -1,0 +1,31 @@
+# Reviewer 2 Progress Tracker
+
+- [x] Initialized Reviewer 2 workspace and read instructions
+- [x] Adversarially inspect `scrapers/bonbast.py`
+  - Fixed quote stripping for `CHROMEDRIVER_PATH`
+  - Added optional `CHROME_BIN` / `CHROME_PATH` support
+- [x] Adversarially inspect `scrapers/navasan.py`
+  - Fixed quote stripping for `CHROMEDRIVER_PATH`
+  - Added optional `CHROME_BIN` / `CHROME_PATH` support
+- [x] Adversarially inspect `scraper_manager.py`
+  - Hardened boolean check in `_kill_process_tree`
+  - Handled `psutil.AccessDenied` during recursive child traversal
+  - Added secondary wait/reap for stubborn processes
+  - Included process exitcode in error message on unexpected worker termination
+- [x] Adversarially inspect `scripts/setup_linux.sh`
+  - Fixed sudo check when `sudo` is not present
+  - Added cross-symlinks for `chromium-browser`, `chromium`, and `google-chrome`
+  - Created `logs/` directory and fixed whole-project ownership under `$SUDO_USER`
+- [x] Adversarially inspect `deployment/currency-pipeline.service`
+  - Added `Environment="HOME=/tmp"` for `www-data` Chromium profile lock hygiene
+- [x] Adversarially inspect `run_scheduler.py`
+  - Added `SIGTERM` signal handler for clean systemd service stopping
+- [x] Adversarially inspect `tests/test_modular_pipeline.py`
+  - Added `sys.path.insert(0, ...)` for direct execution resilience
+- [x] Adversarially inspect `tests/test_hybrid_scrapers.py` and `tests/test_hybrid_scrapers2.py`
+  - Fixed missing `clear=True` in `test_scrapers_dict_dispatch_override` that was leaking live multiprocessing and network calls
+  - Added `test_driver_quit_called_on_exception`
+  - Enhanced `test_kill_process_tree_hygiene`
+- [x] Adversarially inspect `agent-context/` documentation files
+  - Updated `agent-context/known-pitfalls.md` with systemd Chromium `$HOME` profile details
+- [x] Generate `handoff.md` and final `send_message`

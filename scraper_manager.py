@@ -1,5 +1,6 @@
 import asyncio
 import multiprocessing
+import os
 import queue
 from dataclasses import dataclass
 import time
@@ -151,22 +152,53 @@ def _format_result(source, result):
     )
 
 
-# ============================================================
-# کشتن درخت Process برای جلوگیری از Zombie Chrome
-# ============================================================
-
 def _kill_process_tree(pid):
+    """
+    Terminates a process and all of its descendants recursively using psutil
+    to prevent lingering zombie Chrome or ChromeDriver processes on Linux.
+    """
+    if pid is None or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1 or pid == os.getpid():
+        return
     try:
         parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
+        try:
+            children = parent.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
+            children = []
+
         for child in children:
             try:
                 child.kill()
-            except psutil.NoSuchProcess:
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
-        parent.kill()
-    except psutil.NoSuchProcess:
+
+        try:
+            parent.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+
+        procs = children + [parent]
+        gone, alive = psutil.wait_procs(procs, timeout=1.0)
+        if alive:
+            for p in alive:
+                try:
+                    p.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            try:
+                psutil.wait_procs(alive, timeout=0.5)
+            except Exception:
+                pass
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         pass
+    except Exception as e:
+        logger.log_event(
+            level="WARNING",
+            event="process_tree_kill_failed",
+            component="scraper_manager",
+            pid=pid,
+            reason=str(e),
+        )
 
 
 # ============================================================
@@ -387,6 +419,35 @@ def _scraper_worker(source, scraper, result_queue, run_id, snapshot_id):
             )
         )
 
+    finally:
+
+        # Guarantee no orphaned Chrome or ChromeDriver processes linger from this worker
+        try:
+            current_proc = psutil.Process()
+            try:
+                children = current_proc.children(recursive=True)
+            except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
+                children = []
+            for child in children:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            if children:
+                gone, alive = psutil.wait_procs(children, timeout=1.0)
+                if alive:
+                    for p in alive:
+                        try:
+                            p.kill()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                            pass
+                    try:
+                        psutil.wait_procs(alive, timeout=0.5)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
 
 # ============================================================
 # مانیتورینگ غیرمسدودکننده Process در Asyncio
@@ -427,7 +488,7 @@ async def _run_mp_source(source, scraper, run_id, snapshot_id):
 
                 _, result = result_queue.get_nowait()
 
-                process.join(timeout=0.5)
+                process.join(timeout=2.0)
 
                 return _format_result(source, result)
 
@@ -451,10 +512,11 @@ async def _run_mp_source(source, scraper, run_id, snapshot_id):
 
                 except queue.Empty:
 
+                    exitcode = getattr(process, "exitcode", None)
                     return _build_failed_result(
                         source=source,
                         error_type="process_exited_without_result",
-                        message="scraper process exited without returning a result",
+                        message=f"scraper process exited unexpectedly (exitcode {exitcode}) without returning a result",
                     )
 
             # ------------------------------------------------
@@ -516,16 +578,24 @@ async def _run_mp_source(source, scraper, run_id, snapshot_id):
 
     finally:
 
-        if process is not None and process.is_alive():
-
-            _kill_process_tree(process.pid)
-
-            process.join(timeout=1)
+        if process is not None:
+            try:
+                if process.is_alive():
+                    _kill_process_tree(process.pid)
+                    process.join(timeout=1)
+                elif getattr(process, "_popen", None) is not None:
+                    process.join(timeout=0.2)
+            except Exception:
+                pass
+            try:
+                process.close()
+            except Exception:
+                pass
 
         try:
 
+            result_queue.cancel_join_thread()
             result_queue.close()
-            result_queue.join_thread()
 
         except Exception:
 

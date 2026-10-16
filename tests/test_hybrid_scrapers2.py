@@ -17,5 +17,10 @@ if __name__ == "__main__":
     t.test_scrapers_dict_dispatch_override()
     t.test_run_all_in_running_event_loop()
     t.test_mp_source_process_spawn_failure()
+    t.test_bonbast_dynamic_service()
+    t.test_navasan_dynamic_service()
+    t.test_headless_chrome_options()
+    t.test_driver_quit_called_on_exception()
+    t.test_kill_process_tree_hygiene()
     print("ALL TESTS PASSED SUCCESSFULLY!")
 
