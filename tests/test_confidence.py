@@ -49,23 +49,23 @@ class TestConfidenceEngine(unittest.TestCase):
 
     def test_two_sources_potential_medium(self):
         """Two valid sources can at most achieve MEDIUM rating, never HIGH."""
-        # Low dispersion (<= 0.2%)
-        # Mean = 100050.0, Spread = 100.0 -> Dispersion = 100 / 100050 ~= 0.0009995 <= 0.002
+        # Low dispersion (<= 0.5%)
+        # Mean = 100050.0, Spread = 100.0 -> Dispersion = 100 / 100050 ~= 0.0009995 <= 0.005
         prices_low_disp = {"tgju": 100000.0, "bonbast": 100100.0}
         res = confidence.calculate_confidence(prices_low_disp, total_sources=4)
         self.assertEqual(res["rating"], "MEDIUM")
         self.assertEqual(res["score_reason"], "two_valid_sources_acceptable_dispersion")
-        self.assertLess(res["metrics"]["dispersion_pct"], 0.002)
+        self.assertLess(res["metrics"]["dispersion_pct"], 0.005)
 
-        # Moderate dispersion (<= 0.5%)
-        # Mean = 100200.0, Spread = 400.0 -> Dispersion = 400 / 100200 ~= 0.00399 <= 0.005
-        prices_mod_disp = {"tgju": 100000.0, "bonbast": 100400.0}
+        # Moderate dispersion (<= 1.0%)
+        # Mean = 100350.0, Spread = 700.0 -> Dispersion = 700 / 100350 ~= 0.00697 <= 0.01
+        prices_mod_disp = {"tgju": 100000.0, "bonbast": 100700.0}
         res_mod = confidence.calculate_confidence(prices_mod_disp, total_sources=4)
         self.assertEqual(res_mod["rating"], "MEDIUM")
         self.assertEqual(res_mod["score_reason"], "two_valid_sources_acceptable_dispersion")
 
-        # Excessive dispersion (> 0.5%) -> degrades to LOW
-        # Mean = 105000.0, Spread = 10000.0 -> Dispersion = 0.0952 > 0.005
+        # Excessive dispersion (> 1.0%) -> degrades to LOW
+        # Mean = 105000.0, Spread = 10000.0 -> Dispersion = 0.0952 > 0.01
         prices_high_disp = {"tgju": 100000.0, "bonbast": 110000.0}
         res_high = confidence.calculate_confidence(prices_high_disp, total_sources=4)
         self.assertEqual(res_high["rating"], "LOW")
@@ -73,7 +73,7 @@ class TestConfidenceEngine(unittest.TestCase):
 
     def test_three_or_more_sources_high_potential_and_degradation(self):
         """Three or more valid sources have HIGH potential, degrading on dispersion."""
-        # 1. Low dispersion (<= 0.2% / 0.002) -> HIGH
+        # 1. Low dispersion (<= 0.5% / 0.005) -> HIGH
         # Mean = 100050.0, max = 100100.0, min = 100000.0, dispersion = 100 / 100050 ~= 0.0009995
         prices_high = {
             "tgju": 100000.0,
@@ -83,22 +83,22 @@ class TestConfidenceEngine(unittest.TestCase):
         res_high = confidence.calculate_confidence(prices_high, total_sources=3)
         self.assertEqual(res_high["rating"], "HIGH")
         self.assertEqual(res_high["score_reason"], "valid_sources_above_threshold_low_dispersion")
-        self.assertLessEqual(res_high["metrics"]["dispersion_pct"], 0.002)
+        self.assertLessEqual(res_high["metrics"]["dispersion_pct"], 0.005)
 
-        # 2. Moderate dispersion (0.002 < dispersion <= 0.005) -> degrades from HIGH to MEDIUM
-        # Mean = 100200.0, max = 100400.0, min = 100000.0, dispersion = 400 / 100200 ~= 0.00399
+        # 2. Moderate dispersion (0.005 < dispersion <= 0.01) -> degrades from HIGH to MEDIUM
+        # Mean = 100350.0, max = 100700.0, min = 100000.0, dispersion = 700 / 100350 ~= 0.00697
         prices_medium = {
             "tgju": 100000.0,
-            "bonbast": 100400.0,
-            "navasan": 100200.0,
+            "bonbast": 100700.0,
+            "navasan": 100350.0,
         }
         res_med = confidence.calculate_confidence(prices_medium, total_sources=3)
         self.assertEqual(res_med["rating"], "MEDIUM")
         self.assertEqual(res_med["score_reason"], "moderate_dispersion_degraded_to_medium")
-        self.assertGreater(res_med["metrics"]["dispersion_pct"], 0.002)
-        self.assertLessEqual(res_med["metrics"]["dispersion_pct"], 0.005)
+        self.assertGreater(res_med["metrics"]["dispersion_pct"], 0.005)
+        self.assertLessEqual(res_med["metrics"]["dispersion_pct"], 0.01)
 
-        # 3. Excessive dispersion (> 0.005) -> degrades to LOW
+        # 3. Excessive dispersion (> 0.01 / 1.0%) -> degrades to LOW
         # Mean = 101000.0, max = 102000.0, min = 100000.0, dispersion = 2000 / 101000 ~= 0.0198
         prices_low = {
             "tgju": 100000.0,
@@ -317,7 +317,7 @@ class TestConfidenceEngine(unittest.TestCase):
 
         # 2. MEDIUM rating due to moderate dispersion log verification
         mock_log_event.reset_mock()
-        prices_med = {"s1": 100000.0, "s2": 100400.0, "s3": 100200.0}
+        prices_med = {"s1": 100000.0, "s2": 100700.0, "s3": 100350.0}
         confidence.calculate_confidence(prices_med, total_sources=4, currency="EUR")
         med_kwargs = mock_log_event.call_args[1]
         self.assertEqual(med_kwargs["currency"], "EUR")

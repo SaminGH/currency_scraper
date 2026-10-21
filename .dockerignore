@@ -1,0 +1,47 @@
+# Git
+.git/
+.gitignore
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables & secrets (NEVER include in Docker image)
+.env
+.env.*
+!.env.example
+environment/.env
+environment/.env.*
+!environment/.env.example
+
+# Development & IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local runtime logs
+logs/*.jsonl
+logs/*.log
+
+# Windows specific drivers / artifacts
+environment/chromedriver-win64/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Agent context & documentation (not needed at container runtime)
+.agents/
+agent-context/
+.antigravityignore

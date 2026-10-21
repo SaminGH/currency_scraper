@@ -7,12 +7,13 @@ from dotenv import load_dotenv
 import logs.logger as logger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-ENV_FILE = BASE_DIR / "environment" / ".env"
 
+# Check root .env first (standard for Docker / 12-factor apps), fallback to environment/.env
+ROOT_ENV = BASE_DIR / ".env"
+ENV_FILE = ROOT_ENV if ROOT_ENV.exists() else (BASE_DIR / "environment" / ".env")
 
-load_dotenv(ENV_FILE)
-
-DATABASE_URL = os.getenv("DATABASE_URL")
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
 
 # Shared PostgreSQL connection reused across database operations.
 _connection = None
@@ -29,9 +30,12 @@ def get_connection():
 
     global _connection
 
+    # Fetch dynamically from environment
+    database_url = os.getenv("DATABASE_URL")
+
     try:
 
-        if not DATABASE_URL:
+        if not database_url:
             raise ValueError(
                 "DATABASE_URL is not set"
             )
@@ -55,7 +59,7 @@ def get_connection():
                 _connection = None
 
         _connection = psycopg2.connect(
-            DATABASE_URL
+            database_url
         )
 
         logger.log_event(
@@ -103,4 +107,3 @@ def close_connection():
         finally:
 
             _connection = None
-

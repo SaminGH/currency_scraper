@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import uuid
 from datetime import datetime
 
@@ -194,8 +195,14 @@ def log_event(
 
 
         # ----------------------------------------------------
-        # نوشتن JSONL
+        # نوشتن JSONL با fallback امن برای اشیاء غیرسریالایزبل
         # ----------------------------------------------------
+
+        raw_line = json.dumps(
+            log_data,
+            ensure_ascii=False,
+            default=str
+        )
 
         with open(
             LOG_FILE,
@@ -203,13 +210,16 @@ def log_event(
             encoding="utf-8"
         ) as file:
 
-            file.write(
-                json.dumps(
-                    log_data,
-                    ensure_ascii=False
-                )
-                + "\n"
-            )
+            file.write(raw_line + "\n")
+
+
+        # ----------------------------------------------------
+        # خروجی استاندارد stdout و stderr طبق استاندارد استقرار Docker
+        # ----------------------------------------------------
+
+        stream = sys.stderr if str(level).upper() == "ERROR" else sys.stdout
+        stream.write(raw_line + "\n")
+        stream.flush()
 
 
     except Exception:

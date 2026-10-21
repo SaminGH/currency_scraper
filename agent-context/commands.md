@@ -1,5 +1,27 @@
 # Commands Reference
 
+## Docker & Containerization (DOCKER_DEPLOYMENT_STANDARDS-V1.0.0)
+
+### Build Docker Image
+```bash
+docker build -t app .
+```
+
+### Run Container Locally
+```bash
+docker run --rm -p 10000:10000 --env-file .env -e PORT=10000 app
+```
+
+### Verify Container Health Check
+```bash
+curl http://localhost:10000/health
+```
+
+### Run Server Locally without Docker
+```bash
+python server.py
+```
+
 ## Setup & Environment
 
 ### Linux VPS Automated Setup
@@ -14,13 +36,13 @@ source .venv/bin/activate
 
 ### Manual Installation
 ```bash
-# Install dependencies from environment/requirements.txt
-pip install -r environment/requirements.txt
+# Install dependencies
+pip install -r requirements.txt
 
 # Copy example environment configuration
-cp environment/.env.example environment/.env
+cp .env.example .env
 # On Windows PowerShell:
-Copy-Item environment\.env.example environment\.env
+Copy-Item .env.example .env
 ```
 
 ## Systemd Service Management (Linux VPS Daemon)
@@ -65,6 +87,9 @@ python -c "import database; print('Sources:', database.get_source_ids()); print(
 
 ## Test Suite Execution
 ```bash
+# Server health and endpoint unit tests:
+python -m unittest tests/test_server.py
+
 # Modular pipeline unit tests (all stages, mocks, and failure isolation):
 python -m unittest tests/test_modular_pipeline.py
 

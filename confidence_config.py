@@ -23,10 +23,10 @@ MIN_VALID_SOURCES_MEDIUM: int = 2
 # Dispersion (Relative Spread) Criteria
 # Dispersion = (Max(P_valid) - Min(P_valid)) / Mean(P_valid)
 # ============================================================
-# Maximum relative dispersion threshold for HIGH rating (<= 0.2% / 0.002)
-MAX_DISPERSION_HIGH: float = 0.05
+# Maximum relative dispersion threshold for HIGH rating (<= 0.5% / 0.005)
+MAX_DISPERSION_HIGH: float = 0.005
 
-# Maximum relative dispersion threshold for MEDIUM rating (<= 0.5% / 0.005)
+# Maximum relative dispersion threshold for MEDIUM rating (<= 1.0% / 0.01)
 # Dispersion exceeding this threshold degrades the rating to LOW.
 MAX_DISPERSION_MEDIUM: float = 0.01
 

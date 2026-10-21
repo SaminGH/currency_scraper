@@ -1,7 +1,7 @@
 # Project Map
 
 ## Overview
-Automated currency scraping, validation, aggregation, and publishing pipeline for Iranian/foreign exchange rates against IRR/Toman.
+Automated currency scraping, validation, aggregation, and publishing pipeline for Iranian/foreign exchange rates against IRR/Toman. Fully containerized and compliant with `DOCKER_DEPLOYMENT_STANDARDS-V1.0.0` for Docker & Render deployment.
 
 ## Important Directories
 * `scrapers/`: Individual web scrapers for each market source (`alanchand.py`, `bonbast.py`, `navasan.py`, `tgju.py`).
@@ -13,7 +13,10 @@ Automated currency scraping, validation, aggregation, and publishing pipeline fo
 * `agent-context/`: Operational agent context and knowledge files.
 
 ## Important Files & Entry Points
+* `server.py`: Unified Docker & Web Service entrypoint. Binds to `0.0.0.0:$PORT` (default 10000), exposes `GET /health` with HTTP 200 JSON telemetry, and runs the scheduled pipeline in a background worker thread.
+* `Dockerfile`: Production multi-layer container image with Debian Bookworm, Chromium & ChromeDriver, and unbuffered stdout/stderr logging.
 * `main.py`: Primary pipeline orchestrator and CLI entry point.
+* `run_scheduler.py`: Local developer scheduler loop simulator.
 * `scraper_manager.py`: Hybrid asyncio + multiprocessing execution manager with timeouts, retries, and worker isolation for scrapers (asyncio for HTTP scrapers, multiprocessing for Selenium scrapers).
 * `scraper_output.py`: Aggregates outputs from `scraper_manager` across all sources by currency.
 * `validator.py`: Outlier detection (1% threshold) and data consistency checking.
@@ -27,19 +30,21 @@ Automated currency scraping, validation, aggregation, and publishing pipeline fo
 
 ## Major Components & Relationships
 ```
-main.py
-  ├── database.get_connection() & database.create_snapshot()
-  ├── scraper_output.py  ──> scraper_manager.py ──> scrapers/ (alanchand, bonbast, navasan, tgju)
-  ├── validator.py       ──> filters outliers from scraper_output
-  ├── price_aggregator.py──> averages validated rates
-  ├── confidence.py      ──> calculates deterministic confidence ("HIGH", "MEDIUM", "LOW")
-  ├── change.py          ──> calculates 24h change & extremes against midnight baselines
-  └── database.publish_snapshot()
-        ├── save_source_health
-        ├── save_source_rates
-        ├── save_aggregated_rates
-        ├── save_published_rates
-        └── save_snapshot_summary
+server.py (0.0.0.0:$PORT, GET /health)
+  └── scheduler_worker thread (every PIPELINE_INTERVAL_SECONDS)
+        └── main.py
+              ├── database.get_connection() & database.create_snapshot()
+              ├── scraper_output.py  ──> scraper_manager.py ──> scrapers/ (alanchand, bonbast, navasan, tgju)
+              ├── validator.py       ──> filters outliers from scraper_output
+              ├── price_aggregator.py──> averages validated rates
+              ├── confidence.py      ──> calculates deterministic confidence ("HIGH", "MEDIUM", "LOW")
+              ├── change.py          ──> calculates 24h change & extremes against midnight baselines
+              └── database.publish_snapshot()
+                    ├── save_source_health
+                    ├── save_source_rates
+                    ├── save_aggregated_rates
+                    ├── save_published_rates
+                    └── save_snapshot_summary
 ```
 
 ## Common Task Locations
@@ -50,3 +55,4 @@ main.py
 * **24h change calculation logic**: `change.py`.
 * **Database schema & persistence logic**: `database/*.py`.
 * **Logging & telemetry**: `logs/logger.py`.
+* **Docker container & health check**: `Dockerfile` and `server.py`.
