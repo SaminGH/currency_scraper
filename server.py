@@ -18,9 +18,20 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 import logs.logger as logger
-import main
+
+try:
+    import main
+except Exception as exc:
+    main = None
+    logger.log_event(
+        level="WARNING",
+        event="main_import_deferred",
+        component="server",
+        error=str(exc),
+    )
 
 
 # ==============================================================================
@@ -67,6 +78,51 @@ pipeline_state: Dict[str, Any] = {
 _state_lock = threading.Lock()
 
 
+def is_health_route(raw_path: str) -> bool:
+    """
+    Check if a raw request path matches health check endpoints (/ or /health).
+    Safely ignores query parameters, fragments, and trailing slashes.
+    """
+    clean_path = urlparse(raw_path).path
+    return clean_path.startswith("/") and clean_path.rstrip("/") in ("", "/health")
+
+
+def get_telemetry_payload() -> Dict[str, Any]:
+    """
+    Construct structured health telemetry payload without introducing database queries.
+    Marks status as degraded if DATABASE_URL is not configured, or if the scheduler
+    is stopped/failed, or if the most recent pipeline execution encountered an error.
+    """
+    with _state_lock:
+        uptime = round(time.time() - pipeline_state["start_timestamp"], 1)
+        db_configured = bool(os.getenv("DATABASE_URL"))
+        pipeline_state["database"]["configured"] = db_configured
+
+        scheduler_status = pipeline_state["scheduler"]["status"]
+        last_run_status = pipeline_state["scheduler"]["last_run"].get("status")
+        last_run_error = pipeline_state["scheduler"]["last_run"].get("error")
+
+        if not db_configured:
+            overall_status = "degraded"
+        elif scheduler_status in ("stopped", "failed"):
+            overall_status = "degraded"
+        elif last_run_status == "failed" or last_run_error is not None:
+            overall_status = "degraded"
+        else:
+            overall_status = "healthy"
+
+        pipeline_state["status"] = overall_status
+
+        return {
+            "status": overall_status,
+            "service": pipeline_state["service"],
+            "uptime_seconds": uptime,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "database": pipeline_state["database"],
+            "scheduler": pipeline_state["scheduler"],
+        }
+
+
 # ==============================================================================
 # HTTP Health Check Handler
 # ==============================================================================
@@ -78,36 +134,43 @@ class HealthRequestHandler(BaseHTTPRequestHandler):
     """
 
     def do_GET(self):
-        # Respond to /health and root / path with health telemetry
-        if self.path in ("/health", "/health/", "/"):
+        if is_health_route(self.path):
+            payload = get_telemetry_payload()
+            body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(body)
+
+        else:
+            err_body = json.dumps({"error": "Not Found", "path": self.path}).encode("utf-8")
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(err_body)))
+            self.end_headers()
+            self.wfile.write(err_body)
+
+    def do_HEAD(self):
+        """Handle HTTP HEAD probes gracefully without returning a response body."""
+        if is_health_route(self.path):
+            payload = get_telemetry_payload()
+            body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
 
-            with _state_lock:
-                uptime = round(time.time() - pipeline_state["start_timestamp"], 1)
-                db_configured = bool(os.getenv("DATABASE_URL"))
-                pipeline_state["database"]["configured"] = db_configured
-
-                payload = {
-                    "status": "healthy",
-                    "service": pipeline_state["service"],
-                    "uptime_seconds": uptime,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "database": pipeline_state["database"],
-                    "scheduler": pipeline_state["scheduler"],
-                }
-                body = json.dumps(payload, ensure_ascii=False, indent=2)
-
-            self.wfile.write(body.encode("utf-8"))
-
         else:
+            err_body = json.dumps({"error": "Not Found", "path": self.path}).encode("utf-8")
             self.send_response(404)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(err_body)))
             self.end_headers()
-            err_body = json.dumps({"error": "Not Found", "path": self.path})
-            self.wfile.write(err_body.encode("utf-8"))
 
     def log_message(self, format, *args):
         """
@@ -141,84 +204,107 @@ def scheduler_worker(interval_seconds: float, stop_event: threading.Event):
 
     iteration = 1
 
-    while not stop_event.is_set():
-        start_time = time.monotonic()
-        started_at = datetime.now(timezone.utc).isoformat()
-
-        with _state_lock:
-            pipeline_state["scheduler"]["iteration"] = iteration
-            pipeline_state["scheduler"]["is_running_pipeline"] = True
-            pipeline_state["scheduler"]["last_run"]["started_at"] = started_at
-            pipeline_state["scheduler"]["last_run"]["error"] = None
-
-        logger.log_event(
-            level="INFO",
-            event="pipeline_iteration_started",
-            component="scheduler",
-            iteration=iteration,
-        )
-
-        try:
-            result = main.run_pipeline()
-            elapsed = time.monotonic() - start_time
-            completed_at = datetime.now(timezone.utc).isoformat()
+    try:
+        while not stop_event.is_set():
+            start_time = time.monotonic()
+            started_at = datetime.now(timezone.utc).isoformat()
 
             with _state_lock:
-                pipeline_state["scheduler"]["is_running_pipeline"] = False
-                pipeline_state["scheduler"]["last_run"]["completed_at"] = completed_at
-                pipeline_state["scheduler"]["last_run"]["duration_seconds"] = round(elapsed, 2)
-
-                if result:
-                    pipeline_state["scheduler"]["last_run"]["status"] = result.get("status", "complete")
-                    pipeline_state["scheduler"]["last_run"]["snapshot_id"] = result.get("snapshot_id")
-                    pipeline_state["scheduler"]["last_run"]["published_rates"] = result.get("published_rates", 0)
-                else:
-                    pipeline_state["scheduler"]["last_run"]["status"] = "skipped"
+                pipeline_state["scheduler"]["iteration"] = iteration
+                pipeline_state["scheduler"]["is_running_pipeline"] = True
+                pipeline_state["scheduler"]["last_run"]["started_at"] = started_at
+                pipeline_state["scheduler"]["last_run"]["error"] = None
 
             logger.log_event(
                 level="INFO",
-                event="pipeline_iteration_completed",
+                event="pipeline_iteration_started",
                 component="scheduler",
                 iteration=iteration,
-                duration_seconds=round(elapsed, 2),
-                status=result.get("status") if result else "skipped",
             )
 
-        except Exception as exc:
-            elapsed = time.monotonic() - start_time
-            completed_at = datetime.now(timezone.utc).isoformat()
+            try:
+                active_main = main
+                if active_main is None:
+                    try:
+                        import main as imported_main
+                        active_main = imported_main
+                    except Exception as import_err:
+                        raise RuntimeError(f"Pipeline entrypoint 'main' unavailable: {import_err}") from import_err
 
-            with _state_lock:
-                pipeline_state["scheduler"]["is_running_pipeline"] = False
-                pipeline_state["scheduler"]["last_run"]["completed_at"] = completed_at
-                pipeline_state["scheduler"]["last_run"]["duration_seconds"] = round(elapsed, 2)
-                pipeline_state["scheduler"]["last_run"]["status"] = "failed"
-                pipeline_state["scheduler"]["last_run"]["error"] = str(exc)
+                result = active_main.run_pipeline()
+                elapsed = time.monotonic() - start_time
+                completed_at = datetime.now(timezone.utc).isoformat()
 
-            logger.log_event(
-                level="ERROR",
-                event="pipeline_iteration_failed",
-                component="scheduler",
-                iteration=iteration,
-                duration_seconds=round(elapsed, 2),
-                error=str(exc),
-            )
+                with _state_lock:
+                    pipeline_state["scheduler"]["is_running_pipeline"] = False
+                    pipeline_state["scheduler"]["last_run"]["completed_at"] = completed_at
+                    pipeline_state["scheduler"]["last_run"]["duration_seconds"] = round(elapsed, 2)
 
-        # Sleep for remaining interval duration, responding to stop_event promptly
-        sleep_needed = max(0.0, interval_seconds - elapsed)
-        if sleep_needed > 0:
-            stop_event.wait(timeout=sleep_needed)
+                    if result:
+                        pipeline_state["scheduler"]["last_run"]["status"] = result.get("status", "complete")
+                        pipeline_state["scheduler"]["last_run"]["snapshot_id"] = result.get("snapshot_id")
+                        pipeline_state["scheduler"]["last_run"]["published_rates"] = result.get("published_rates", 0)
+                    else:
+                        pipeline_state["scheduler"]["last_run"]["status"] = "skipped"
 
-        iteration += 1
+                logger.log_event(
+                    level="INFO",
+                    event="pipeline_iteration_completed",
+                    component="scheduler",
+                    iteration=iteration,
+                    duration_seconds=round(elapsed, 2),
+                    status=result.get("status") if result else "skipped",
+                )
 
-    with _state_lock:
-        pipeline_state["scheduler"]["status"] = "stopped"
+            except Exception as exc:
+                elapsed = time.monotonic() - start_time
+                completed_at = datetime.now(timezone.utc).isoformat()
 
-    logger.log_event(
-        level="INFO",
-        event="scheduler_stopped",
-        component="scheduler",
-    )
+                with _state_lock:
+                    pipeline_state["scheduler"]["is_running_pipeline"] = False
+                    pipeline_state["scheduler"]["last_run"]["completed_at"] = completed_at
+                    pipeline_state["scheduler"]["last_run"]["duration_seconds"] = round(elapsed, 2)
+                    pipeline_state["scheduler"]["last_run"]["status"] = "failed"
+                    pipeline_state["scheduler"]["last_run"]["error"] = str(exc)
+
+                logger.log_event(
+                    level="ERROR",
+                    event="pipeline_iteration_failed",
+                    component="scheduler",
+                    iteration=iteration,
+                    duration_seconds=round(elapsed, 2),
+                    error=str(exc),
+                )
+
+            # Sleep for remaining interval duration, responding to stop_event promptly
+            sleep_needed = max(0.0, interval_seconds - elapsed)
+            if sleep_needed > 0:
+                stop_event.wait(timeout=sleep_needed)
+
+            iteration += 1
+
+    except Exception as fatal_exc:
+        with _state_lock:
+            pipeline_state["scheduler"]["status"] = "failed"
+            pipeline_state["scheduler"]["is_running_pipeline"] = False
+            pipeline_state["scheduler"]["last_run"]["error"] = str(fatal_exc)
+        logger.log_event(
+            level="CRITICAL",
+            event="scheduler_fatal_crash",
+            component="scheduler",
+            error=str(fatal_exc),
+        )
+    finally:
+        with _state_lock:
+            if pipeline_state["scheduler"]["status"] != "failed":
+                pipeline_state["scheduler"]["status"] = "stopped"
+            pipeline_state["scheduler"]["is_running_pipeline"] = False
+
+        logger.log_event(
+            level="INFO",
+            event="scheduler_stopped",
+            component="scheduler",
+        )
 
 
 # ==============================================================================

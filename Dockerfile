@@ -47,7 +47,7 @@ EXPOSE 10000
 
 # Container healthcheck testing the GET /health endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/health || exit 1
+    CMD curl -f http://127.0.0.1:${PORT:-10000}/health || exit 1
 
 # Start unified web server and scheduler entrypoint
 CMD ["python", "server.py"]
