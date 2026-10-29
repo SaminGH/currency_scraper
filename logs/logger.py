@@ -233,7 +233,7 @@ def _get_db_connection() -> Optional[Any]:
     if _last_db_failure_time > 0 and (now - _last_db_failure_time) < reconnect_interval:
         return None
 
-    connect_timeout = getattr(log_config, "DB_CONNECT_TIMEOUT", 3)
+    connect_timeout = getattr(log_config, "DB_CONNECT_TIMEOUT", 10)
 
     try:
         conn = psycopg2.connect(db_url, connect_timeout=connect_timeout)
@@ -244,9 +244,14 @@ def _get_db_connection() -> Optional[Any]:
         _last_db_url = db_url
         _last_db_failure_time = 0.0
         return _db_connection
-    except Exception:
+    except Exception as exc:
         _last_db_failure_time = time.monotonic()
         _reset_db_connection(reset_cooldown=False)
+        try:
+            sys.stderr.write(f"[LOGGER DB CONNECT ERROR] {exc}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
         return None
 
 
@@ -275,7 +280,7 @@ def _ensure_table_exists(conn: Any, table_name: str) -> None:
                 );
             """)
         _verified_tables.add(table_name)
-    except Exception:
+    except Exception as table_exc:
         # Cleanly rollback to protect connection state if not in autocommit mode
         try:
             if hasattr(conn, "rollback"):
@@ -283,6 +288,11 @@ def _ensure_table_exists(conn: Any, table_name: str) -> None:
         except Exception:
             pass
         _verified_tables.add(table_name)
+        try:
+            sys.stderr.write(f"[LOGGER DB TABLE ERROR] Failed ensuring table {table_name}: {table_exc}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -363,17 +373,34 @@ def _log_to_db(
                 with conn.cursor() as cursor:
                     cursor.execute(insert_sql, params)
                 return True
-            except Exception:
+            except Exception as insert_exc:
+                try:
+                    sys.stderr.write(f"[LOGGER DB INSERT ERROR] {insert_exc}\n")
+                    sys.stderr.flush()
+                except Exception:
+                    pass
                 # In case of dropped connection, retry once with fresh connection
                 _reset_db_connection(reset_cooldown=True)
                 conn = _get_db_connection()
                 if conn is not None:
-                    with conn.cursor() as cursor:
-                        cursor.execute(insert_sql, params)
-                    return True
+                    try:
+                        with conn.cursor() as cursor:
+                            cursor.execute(insert_sql, params)
+                        return True
+                    except Exception as retry_exc:
+                        try:
+                            sys.stderr.write(f"[LOGGER DB RETRY ERROR] {retry_exc}\n")
+                            sys.stderr.flush()
+                        except Exception:
+                            pass
                 return False
 
-        except Exception:
+        except Exception as outer_db_exc:
+            try:
+                sys.stderr.write(f"[LOGGER DB OP ERROR] {outer_db_exc}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
             _reset_db_connection(reset_cooldown=False)
             return False
 

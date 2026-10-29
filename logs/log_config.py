@@ -72,7 +72,7 @@ FALLBACK_TO_FILE_ON_DB_ERROR: bool = _parse_bool_env(
 DATABASE_URL: Optional[str] = _clean_str(os.getenv("DATABASE_URL")) or None
 
 # Database connect timeout in seconds
-DB_CONNECT_TIMEOUT: int = _parse_int_env("DB_CONNECT_TIMEOUT", default=3)
+DB_CONNECT_TIMEOUT: int = _parse_int_env("DB_CONNECT_TIMEOUT", default=10)
 
 # Cooldown interval before retrying connection to offline DB (seconds)
 DB_RECONNECT_INTERVAL: int = _parse_int_env("DB_RECONNECT_INTERVAL", default=30)
@@ -144,5 +144,5 @@ def reset_to_defaults() -> None:
         "FALLBACK_TO_FILE_ON_DB_ERROR", default=True
     )
     DATABASE_URL = _clean_str(os.getenv("DATABASE_URL")) or None
-    DB_CONNECT_TIMEOUT = _parse_int_env("DB_CONNECT_TIMEOUT", default=3)
+    DB_CONNECT_TIMEOUT = _parse_int_env("DB_CONNECT_TIMEOUT", default=10)
     DB_RECONNECT_INTERVAL = _parse_int_env("DB_RECONNECT_INTERVAL", default=30)
