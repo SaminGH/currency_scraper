@@ -1,58 +1,45 @@
 # Project Map
 
-## Overview
-Automated currency scraping, validation, aggregation, and publishing pipeline for Iranian/foreign exchange rates against IRR/Toman. Fully containerized and compliant with `DOCKER_DEPLOYMENT_STANDARDS-V1.0.0` for Docker & Render deployment.
+Automated currency scraping, validation, aggregation, and publishing pipeline.
 
 ## Important Directories
 * `scrapers/`: Individual web scrapers for each market source (`alanchand.py`, `bonbast.py`, `navasan.py`, `tgju.py`).
 * `database/`: PostgreSQL persistence layer (connection, models, queries, savepoints, atomic publishing) guided in supabase.
-* `environment/`: Environment configuration (`.env.example`) and Python dependencies (`requirements.txt`).
-* `logs/`: Structured event logging utilities (`logger.py`) and log output (`pipeline.jsonl`).
+* `environment/`: Environment configuration (`.env.example`), Python dependencies (`requirements.txt`), and bundled ChromeDriver binary.
+* `logs/`: Structured event logging utilities (`logger.py`, `log_config.py`) and log output (`pipeline.jsonl`, `public.pipeline_logs`).
 * `scripts/`: Provisioning and deployment scripts (`setup_linux.sh` for Ubuntu/Debian).
 * `deployment/`: Production systemd daemon units (`currency-pipeline.service`).
 * `agent-context/`: Operational agent context and knowledge files.
 
 ## Important Files & Entry Points
-* `server.py`: Unified Docker & Web Service entrypoint. Binds to `0.0.0.0:$PORT` (default 10000), exposes `GET /health` with HTTP 200 JSON telemetry, and runs the scheduled pipeline in a background worker thread.
-* `Dockerfile`: Production multi-layer container image with Debian Bookworm, Chromium & ChromeDriver, and unbuffered stdout/stderr logging.
-* `main.py`: Primary pipeline orchestrator and CLI entry point.
-* `run_scheduler.py`: Local developer scheduler loop simulator.
-* `scraper_manager.py`: Hybrid asyncio + multiprocessing execution manager with timeouts, retries, and worker isolation for scrapers (asyncio for HTTP scrapers, multiprocessing for Selenium scrapers).
-* `scraper_output.py`: Aggregates outputs from `scraper_manager` across all sources by currency.
-* `validator.py`: Outlier detection (1% threshold) and data consistency checking.
-* `confidence_config.py`: Centralized configuration for confidence score thresholds (source count, dispersion, freshness).
-* `confidence.py`: Dedicated deterministic confidence score engine calculating quality ratings ("HIGH", "MEDIUM", "LOW").
-* `price_aggregator.py`: Computes average prices, confidence metrics, and publishability flags (>= 2 valid sources).
-* `change.py`: Modular daily change and range engine (`calculate_daily_change`, `calculate_daily_high_low`, and `calculate_daily_change_and_range` / `calculate_change_24h`) with in-memory carry-forward caching, mid-day DB recovery, and calendar-day high/low extremes.
-* `database/__init__.py`: Public API interface for database operations.
-* `database/connection.py`: Reusable PostgreSQL connection provider using `psycopg2`.
-* `database/publisher.py`: Atomic transaction publisher managing savepoints and final snapshot completion.
+* `main.py`: Top-level orchestrator; coordinates phases 1-3.
+* `scraper_manager.py`: Runs all registered scrapers via multiprocessing and asyncio with retry and timeout logic.
+* `scraper_output.py`: Formats scraper results into standard `{source: {prices, errors}}` and `{source: {status, failure_reason, currencies_received}}`.
+* `validator.py`: Identifies statistical outliers using IQR/MAD and filters corrupted rates.
+* `price_aggregator.py`: Computes average, min, max, spread, and publishability across valid rates.
+* `confidence.py`: Deterministic confidence engine; computes HIGH/MEDIUM/LOW confidence scores and structured score breakdown per currency without machine learning or external API dependencies.
+* `confidence_config.py`: Centralized configuration thresholds and rating criteria for the confidence engine.
+* `change.py`: Computes 24-hour rate change and 24-hour highs/lows against the prior snapshot.
+* `run_scheduler.py`: Continuous scheduler loop with jitter, health reporting, and self-healing.
+* `server.py`: Unified web server and scheduler entry point for Docker/Render deployments (0.0.0.0:$PORT, GET /health).
+* `database/connection.py`: Shared reusable connection manager with reconnect logic.
+* `database/lookup.py`: In-memory caching for `source_id` and `currency_id` lookups.
+* `database/snapshot.py`: Snapshot lifecycle management (`create_snapshot`, `complete_snapshot`).
+* `database/publisher.py`: Atomic write orchestration; writes source status, rates, aggregate, and summary within a savepoint.
+* `database/source_health.py`: Batch inserts into `snapshot_source_status`.
+* `database/source_rates.py`: Batch inserts raw prices into `source_rates`.
+* `database/aggregated_rates.py`: Batch inserts computed rates into `aggregated_rates`.
+* `database/published_rates.py`: Batch inserts publishable rates into `published_rates`.
+* `database/summary.py`: Inserts summary counters into `snapshot_summary`.
+* `logs/logger.py`: JSONL structured logger and database event logger (`log_event`).
+* `logs/log_config.py`: Centralized configuration for log targets (`json`, `db`, `both`) and file paths.
 
-## Major Components & Relationships
-```
-server.py (0.0.0.0:$PORT, GET /health)
-  └── scheduler_worker thread (every PIPELINE_INTERVAL_SECONDS)
-        └── main.py
-              ├── database.get_connection() & database.create_snapshot()
-              ├── scraper_output.py  ──> scraper_manager.py ──> scrapers/ (alanchand, bonbast, navasan, tgju)
-              ├── validator.py       ──> filters outliers from scraper_output
-              ├── price_aggregator.py──> averages validated rates
-              ├── confidence.py      ──> calculates deterministic confidence ("HIGH", "MEDIUM", "LOW")
-              ├── change.py          ──> calculates 24h change & extremes against midnight baselines
-              └── database.publish_snapshot()
-                    ├── save_source_health
-                    ├── save_source_rates
-                    ├── save_aggregated_rates
-                    ├── save_published_rates
-                    └── save_snapshot_summary
-```
-
-## Common Task Locations
-* **Adding or updating a scraper**: `scrapers/<source_name>.py` and register in `scraper_manager.py` (`SCRAPERS` dict).
-* **Validation & outlier thresholds**: `validator.py` (`OUTLIER_THRESHOLD`).
-* **Confidence scoring & dispersion thresholds**: `confidence_config.py` and `confidence.py`.
+## Finding Specific Logic
+* **Scraping logic per source**: `scrapers/<source_name>.py`.
+* **Outlier detection logic**: `validator.py`.
+* **Confidence scoring algorithm**: `confidence.py`.
 * **Aggregation & publish criteria**: `price_aggregator.py` (`publishable` logic).
 * **24h change calculation logic**: `change.py`.
 * **Database schema & persistence logic**: `database/*.py`.
-* **Logging & telemetry**: `logs/logger.py`.
+* **Logging & telemetry**: `logs/logger.py` and `logs/log_config.py`.
 * **Docker container & health check**: `Dockerfile` and `server.py`.
