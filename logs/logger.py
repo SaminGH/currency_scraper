@@ -274,9 +274,9 @@ def _ensure_table_exists(conn: Any, table_name: str) -> None:
                     run_id TEXT,
                     snapshot_id BIGINT,
                     level VARCHAR(50),
-                    event VARCHAR(100),
-                    component VARCHAR(100),
-                    extra_data JSONB DEFAULT '{{}}'::jsonb
+                    event VARCHAR(128),
+                    component VARCHAR(64),
+                    details JSONB DEFAULT '{{}}'::jsonb
                 );
             """)
         _verified_tables.add(table_name)
@@ -351,49 +351,77 @@ def _log_to_db(
                 try:
                     snap_val = int(snap_val)
                 except (ValueError, TypeError):
-                    pass
+                    snap_val = None
 
-            extra_json = json.dumps(extra_data, default=str, ensure_ascii=False)
+            details_json = json.dumps(extra_data, default=str, ensure_ascii=False)
 
-            insert_sql = f"""
-                INSERT INTO {table_name} (timestamp, run_id, snapshot_id, level, event, component, extra_data)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
-            """
-            params = (
-                timestamp,
-                run_id,
-                snap_val,
-                str(level or "INFO"),
-                str(event or "unknown"),
-                str(component or "unknown"),
-                extra_json,
-            )
-
-            try:
-                with conn.cursor() as cursor:
+            def _execute_insert(target_conn: Any, col: str, current_snap: Optional[int]) -> bool:
+                insert_sql = f"""
+                    INSERT INTO {table_name} (timestamp, run_id, snapshot_id, level, event, component, {col})
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
+                """
+                params = (
+                    timestamp,
+                    run_id,
+                    current_snap,
+                    str(level or "INFO"),
+                    str(event or "unknown"),
+                    str(component or "unknown"),
+                    details_json,
+                )
+                with target_conn.cursor() as cursor:
                     cursor.execute(insert_sql, params)
                 return True
-            except Exception as insert_exc:
+
+            primary_col = getattr(log_config, "LOG_JSON_COLUMN", "details")
+            candidate_cols = [primary_col]
+            alt_col = "extra_data" if primary_col == "details" else "details"
+            if alt_col not in candidate_cols:
+                candidate_cols.append(alt_col)
+
+            for col in candidate_cols:
                 try:
-                    sys.stderr.write(f"[LOGGER DB INSERT ERROR] {insert_exc}\n")
-                    sys.stderr.flush()
-                except Exception:
-                    pass
-                # In case of dropped connection, retry once with fresh connection
-                _reset_db_connection(reset_cooldown=True)
-                conn = _get_db_connection()
-                if conn is not None:
-                    try:
-                        with conn.cursor() as cursor:
-                            cursor.execute(insert_sql, params)
-                        return True
-                    except Exception as retry_exc:
+                    return _execute_insert(conn, col, snap_val)
+                except Exception as insert_exc:
+                    err_msg = str(insert_exc).lower()
+
+                    # If column does not exist, try the alternate column name
+                    if f'column "{col}"' in err_msg or (col in err_msg and "does not exist" in err_msg):
+                        continue
+
+                    # If foreign key violation on snapshot_id, retry with snapshot_id=None
+                    if "foreign key" in err_msg and "snapshot_id" in err_msg and snap_val is not None:
                         try:
-                            sys.stderr.write(f"[LOGGER DB RETRY ERROR] {retry_exc}\n")
-                            sys.stderr.flush()
+                            return _execute_insert(conn, col, None)
                         except Exception:
                             pass
-                return False
+
+                    try:
+                        sys.stderr.write(f"[LOGGER DB INSERT ERROR] {insert_exc}\n")
+                        sys.stderr.flush()
+                    except Exception:
+                        pass
+
+                    # Reconnect once on connection failure
+                    _reset_db_connection(reset_cooldown=True)
+                    conn = _get_db_connection()
+                    if conn is not None:
+                        try:
+                            return _execute_insert(conn, col, snap_val)
+                        except Exception as retry_exc:
+                            if "foreign key" in str(retry_exc).lower() and snap_val is not None:
+                                try:
+                                    return _execute_insert(conn, col, None)
+                                except Exception:
+                                    pass
+                            try:
+                                sys.stderr.write(f"[LOGGER DB RETRY ERROR] {retry_exc}\n")
+                                sys.stderr.flush()
+                            except Exception:
+                                pass
+                    return False
+
+            return False
 
         except Exception as outer_db_exc:
             try:

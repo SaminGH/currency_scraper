@@ -62,6 +62,7 @@ LOG_FILE_NAME: str = _clean_str(os.getenv("LOG_FILE_NAME", "pipeline.jsonl")) or
 
 # Target PostgreSQL table for database logging
 LOG_TABLE_NAME: str = _clean_str(os.getenv("LOG_TABLE_NAME", "public.pipeline_logs")) or "public.pipeline_logs"
+LOG_JSON_COLUMN: str = _clean_str(os.getenv("LOG_JSON_COLUMN", "details")) or "details"
 
 # If True, writing to JSON file is attempted when DB logging fails
 FALLBACK_TO_FILE_ON_DB_ERROR: bool = _parse_bool_env(
